@@ -38,8 +38,8 @@ MSuite App ──(API Key)──▶ Nexus       ┼──▶ Local NVMe Asset Ca
 
 ### 1. Installation
 ```bash
-git clone https://github.com/merlinthedev848/MSuite-CodeHandler.git
-cd MSuite-CodeHandler
+git clone https://github.com/merlinthedev848/MSuite-Nexus.git
+cd MSuite-Nexus
 npm install
 ```
 

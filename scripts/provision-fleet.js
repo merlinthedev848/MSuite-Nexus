@@ -28,7 +28,7 @@ const PRODUCTS = [
   { name: 'msuite-sentinel', desc: 'MSuite Sentinel Security Agent', repos: [`${org}/MSuite-Sentinel`], perms: ['releases', 'raw'] },
   { name: 'msuite-honeypot', desc: 'MSuite HoneyPot Threat Sensor', repos: [`${org}/MSuite-HoneyPot`], perms: ['releases', 'raw'] },
   { name: 'msuite-mstream', desc: 'MSuite Media & Streaming Core', repos: [`${org}/MStream`], perms: ['releases', 'raw', 'archive'] },
-  { name: 'msuite-codehandler', desc: 'MSuite CodeHandler & Core Engine', repos: [`${org}/MSuite-CodeHandler`], perms: ['releases', 'raw', 'archive'] },
+  { name: 'msuite-nexus', desc: 'MSuite Nexus Central Gateway & Core Engine', repos: [`${org}/MSuite-Nexus`], perms: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'] },
 ];
 
 let data = { clients: [] };

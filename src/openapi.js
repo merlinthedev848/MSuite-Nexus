@@ -4,7 +4,7 @@ export function generateOpenApiSpec({ publicBaseUrl = '' } = {}) {
     info: {
       title: 'MSuite Nexus API',
       version: '2.0.0',
-      description: 'Enterprise GitHub Private Proxy, Binary Artifact Hub & Developer Portal for the MSuite Product Family.',
+      description: 'Enterprise Universal Gateway, GitHub Private Proxy, Binary Artifact Hub & Central Exchange for the MSuite Product Family.',
       contact: {
         name: 'MSuite Core Architecture Team',
       },
@@ -12,7 +12,7 @@ export function generateOpenApiSpec({ publicBaseUrl = '' } = {}) {
     servers: [
       {
         url: publicBaseUrl || '/',
-        description: 'MSuite Nexus Proxy Server',
+        description: 'MSuite Nexus Gateway & Exchange Server',
       },
     ],
     components: {
