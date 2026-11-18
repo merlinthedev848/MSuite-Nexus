@@ -28,8 +28,11 @@ echo "[+] Installing Node.js 22 LTS via official NodeSource repository..."
 if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
   apt-get update -y
   apt-get install -y curl ca-certificates gnupg
+  # Remove old conflicting Ubuntu packages if present (e.g. libnode-dev, libnode72)
+  apt-get remove -y libnode-dev libnode72 nodejs npm 2>/dev/null || true
+  apt-get autoremove -y 2>/dev/null || true
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
-  apt-get install -y nodejs
+  apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs
 elif [ -f /etc/redhat-release ]; then
   curl -fsSL https://rpm.nodesource.com/setup_22.x | bash -
   yum install -y nodejs
