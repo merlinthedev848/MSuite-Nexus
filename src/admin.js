@@ -297,7 +297,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
 
   // Interactive API Sandbox Tester
   router.post('/tester', async (req, res) => {
-    const { path: reqPath, method = 'GET', clientKey, clientName } = req.body || {};
+    const { path: reqPath, method = 'GET', clientKey, clientName, headers: customHeaders, body: requestBody } = req.body || {};
     if (!reqPath || !reqPath.startsWith('/v1/')) {
       return res.status(400).json({ error: 'bad_request', message: 'Path must begin with /v1/' });
     }
@@ -308,6 +308,9 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
 
     try {
       const headers = {};
+      if (customHeaders && typeof customHeaders === 'object') {
+        Object.assign(headers, customHeaders);
+      }
 
       if (clientKey) {
         headers['Authorization'] = `Bearer ${clientKey}`;
@@ -317,7 +320,18 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
         headers['X-Admin-Token'] = config.adminToken;
       }
 
-      const upstreamRes = await fetch(url, { method, headers });
+      const fetchOptions = { method, headers };
+      if (requestBody !== undefined && method !== 'GET' && method !== 'HEAD') {
+        if (typeof requestBody === 'object') {
+          headers['Content-Type'] = 'application/json';
+          fetchOptions.body = JSON.stringify(requestBody);
+        } else {
+          headers['Content-Type'] = 'text/plain; charset=utf-8';
+          fetchOptions.body = String(requestBody);
+        }
+      }
+
+      const upstreamRes = await fetch(url, fetchOptions);
       const latencyMs = Date.now() - start;
       const status = upstreamRes.status;
 

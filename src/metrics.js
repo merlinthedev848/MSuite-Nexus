@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+
 export class MetricsCollector {
   constructor({ maxLogHistory = 150 } = {}) {
     this.maxLogHistory = maxLogHistory;
@@ -29,8 +31,11 @@ export class MetricsCollector {
     this.minuteBuckets.set(minute, (this.minuteBuckets.get(minute) || 0) + 1);
     // Keep only last 30 minutes
     if (this.minuteBuckets.size > 30) {
-      const oldest = Math.min(...this.minuteBuckets.keys());
-      this.minuteBuckets.delete(oldest);
+      const keys = Array.from(this.minuteBuckets.keys());
+      if (keys.length > 0) {
+        const oldest = Math.min(...keys);
+        this.minuteBuckets.delete(oldest);
+      }
     }
 
     const clientName = client || 'anonymous';
@@ -41,7 +46,7 @@ export class MetricsCollector {
     this.clientStats.set(clientName, cStat);
 
     const logEntry = {
-      id: Math.random().toString(36).substring(2, 9),
+      id: randomUUID(),
       time: new Date().toISOString(),
       client: clientName,
       ip,

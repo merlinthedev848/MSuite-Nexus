@@ -9,6 +9,8 @@ COPY src ./src
 COPY scripts ./scripts
 COPY public ./public
 
+RUN mkdir -p /app/.cache /config && chown -R node:node /app /config
+
 USER node
 EXPOSE 8080
 ENV PORT=8080 CLIENTS_FILE=/config/clients.json

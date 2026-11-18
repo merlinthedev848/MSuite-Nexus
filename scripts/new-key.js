@@ -16,7 +16,15 @@ for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file') file = args[++i];
   else if (args[i] === '--perms') perms = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
   else if (args[i] === '--ips') allowedIps = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
-  else if (args[i] === '--expires') expiresAt = new Date(args[++i]).toISOString();
+  else if (args[i] === '--expires') {
+    const rawExp = args[++i];
+    const expTime = new Date(rawExp).getTime();
+    if (isNaN(expTime)) {
+      console.error(`Error: Invalid date format for --expires "${rawExp}". Use ISO format e.g. YYYY-MM-DD.`);
+      process.exit(1);
+    }
+    expiresAt = new Date(expTime).toISOString();
+  }
   else if (args[i] === '--desc') description = args[++i];
   else positional.push(args[i]);
 }

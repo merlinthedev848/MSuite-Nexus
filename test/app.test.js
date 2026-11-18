@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { createHmac } from 'node:crypto';
 import { createApp } from '../src/app.js';
-import { ClientStore, hashKey, parseClients } from '../src/clients.js';
+import { ClientStore, hashKey, parseClients, safeIsoDate } from '../src/clients.js';
 import { GitHub } from '../src/github.js';
 import { MetricsCollector } from '../src/metrics.js';
 import { EventBroker } from '../src/events.js';
@@ -350,6 +350,25 @@ test('Admin API Sandbox tester (/api/admin/tester)', async () => {
   assert.equal(simData.ok, true);
   assert.equal(simData.status, 200);
   assert.equal(simData.body.name, 'b');
+
+  // Test POST with payload and custom headers in sandbox tester
+  const hookPayload = JSON.stringify({ action: 'ping' });
+  const hookSig = 'sha256=' + createHmac('sha256', WEBHOOK_SECRET).update(hookPayload).digest('hex');
+
+  const postRes = await adminReq('/api/admin/tester', 'POST', {
+    path: '/v1/webhook',
+    method: 'POST',
+    headers: {
+      'X-GitHub-Event': 'ping',
+      'X-Hub-Signature-256': hookSig,
+    },
+    body: { action: 'ping' },
+  });
+  assert.equal(postRes.status, 200);
+  const postData = await postRes.json();
+  assert.equal(postData.status, 200);
+  assert.equal(postData.body.ok, true);
+  assert.equal(postData.body.message, 'pong');
 });
 
 test('GitHub Webhook with HMAC signature invalidates cache', async () => {
@@ -389,4 +408,27 @@ test('compareVersions', () => {
   assert.equal(compareVersions('1.2.0', '1.10.0'), -1);
   assert.equal(compareVersions('1.2.0', '1.2.0-beta.1'), 1);
   assert.equal(compareVersions('1.2.0-beta.2', '1.2.0-beta.10'), -1);
+});
+
+test('safeIsoDate and resilient AuditLogger parsing', () => {
+  assert.equal(safeIsoDate(null), null);
+  assert.equal(safeIsoDate(''), null);
+  assert.equal(safeIsoDate('not-a-valid-date'), null);
+  assert.equal(safeIsoDate('2026-11-18T10:00:00Z'), '2026-11-18T10:00:00.000Z');
+
+  const testAuditFile = path.join(testCacheDir, 'corrupted_audit.jsonl');
+  fs.mkdirSync(path.dirname(testAuditFile), { recursive: true });
+  // Write one valid line, one corrupted line, and one valid line
+  fs.writeFileSync(
+    testAuditFile,
+    JSON.stringify({ action: 'FIRST' }) + '\n' +
+    'CORRUPTED_JSON_LINE\n' +
+    JSON.stringify({ action: 'SECOND' }) + '\n'
+  );
+
+  const logger = new AuditLogger({ logFile: testAuditFile });
+  const entries = logger.getEntries();
+  assert.equal(entries.length, 2);
+  assert.equal(entries[0].action, 'SECOND');
+  assert.equal(entries[1].action, 'FIRST');
 });

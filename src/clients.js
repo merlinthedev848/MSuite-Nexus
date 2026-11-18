@@ -7,6 +7,13 @@ export const PERMISSIONS = ['releases', 'raw', 'archive'];
 export const hashKey = (key) => createHash('sha256').update(String(key), 'utf8').digest('hex');
 export const generateKey = () => 'msk_' + randomBytes(32).toString('base64url');
 
+export function safeIsoDate(d) {
+  if (!d) return null;
+  const time = new Date(d).getTime();
+  if (isNaN(time)) return null;
+  return new Date(time).toISOString();
+}
+
 function ipv4ToInt(ip) {
   return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)) >>> 0, 0);
 }
@@ -96,7 +103,7 @@ export function parseClients(data) {
       createdAt: c.createdAt || null,
       description: c.description ? String(c.description).trim() : '',
       allowedIps: Array.isArray(c.allowedIps) && c.allowedIps.length ? c.allowedIps.map((s) => String(s).trim()) : ['*'],
-      expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null,
+      expiresAt: safeIsoDate(c.expiresAt),
     };
 
     byName.set(name.toLowerCase(), clientObj);
@@ -152,9 +159,18 @@ export class ClientStore {
     const dir = path.dirname(this.file);
     if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
 
+    const serialized = JSON.stringify({ clients }, null, 2) + '\n';
     const tmp = `${this.file}.tmp.${Date.now()}`;
-    fs.writeFileSync(tmp, JSON.stringify({ clients }, null, 2) + '\n');
-    fs.renameSync(tmp, this.file);
+    try {
+      fs.writeFileSync(tmp, serialized);
+      fs.renameSync(tmp, this.file);
+    } catch {
+      // Fallback for Docker single-file bind mounts where renameSync fails with EBUSY/EXDEV
+      fs.writeFileSync(this.file, serialized);
+      if (fs.existsSync(tmp)) {
+        try { fs.unlinkSync(tmp); } catch {}
+      }
+    }
   }
 
   watch(log = () => {}) {
@@ -223,7 +239,7 @@ export class ClientStore {
       permissions: new Set(permissions),
       disabled: false,
       allowedIps: Array.isArray(allowedIps) && allowedIps.length ? allowedIps.map((s) => String(s).trim()) : ['*'],
-      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
+      expiresAt: safeIsoDate(expiresAt),
       keyHash,
       createdAt: new Date().toISOString(),
     };
@@ -255,7 +271,7 @@ export class ClientStore {
       client.allowedIps = Array.isArray(allowedIps) && allowedIps.length ? allowedIps.map((s) => String(s).trim()) : ['*'];
     }
     if (expiresAt !== undefined) {
-      client.expiresAt = expiresAt ? new Date(expiresAt).toISOString() : null;
+      client.expiresAt = safeIsoDate(expiresAt);
     }
     if (disabled !== undefined) {
       client.disabled = Boolean(disabled);

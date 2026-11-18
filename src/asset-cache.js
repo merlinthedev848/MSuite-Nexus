@@ -21,7 +21,19 @@ export class AssetCache {
 
     if (this.enabled) {
       if (!fs.existsSync(this.cacheDir)) {
-        fs.mkdirSync(this.cacheDir, { recursive: true });
+        try {
+          fs.mkdirSync(this.cacheDir, { recursive: true });
+        } catch {}
+      } else {
+        // Clean up any stale temporary files from previous interrupted downloads
+        try {
+          const files = fs.readdirSync(this.cacheDir);
+          for (const f of files) {
+            if (f.includes('.tmp.')) {
+              try { fs.unlinkSync(path.join(this.cacheDir, f)); } catch {}
+            }
+          }
+        } catch {}
       }
     }
   }
@@ -245,7 +257,7 @@ export class AssetCache {
         hits: this.hits,
         misses: this.misses,
         bytesSaved: this.bytesSaved,
-        items: metas.sort((a, b) => new Date(b.cachedAt) - new Date(a.cachedAt)),
+        items: metas.sort((a, b) => new Date(b.cachedAt || 0) - new Date(a.cachedAt || 0)),
       };
     } catch (e) {
       return { enabled: this.enabled, error: e.message };

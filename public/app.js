@@ -607,6 +607,7 @@ async function executeSandboxRequest() {
   const path = el('sandboxPathInput').value.trim();
   const method = el('sandboxMethod').value;
   const clientName = el('sandboxClientSelect').value;
+  const rawBody = el('sandboxBodyInput')?.value.trim();
 
   if (!path) return toast('Request path cannot be empty', 'warning');
 
@@ -614,10 +615,19 @@ async function executeSandboxRequest() {
   card.classList.remove('hidden');
   el('sandboxResponseBody').textContent = 'Executing request...';
 
+  let parsedBody = undefined;
+  if (method !== 'GET' && rawBody) {
+    try {
+      parsedBody = JSON.parse(rawBody);
+    } catch {
+      parsedBody = rawBody;
+    }
+  }
+
   try {
     const res = await api('/api/admin/tester', {
       method: 'POST',
-      body: { path, method, clientName: clientName || null },
+      body: { path, method, clientName: clientName || null, body: parsedBody },
     });
 
     const statusTag = el('sandboxStatusTag');
@@ -976,18 +986,29 @@ function setupEventListeners() {
   };
 
   // Sandbox
+  el('sandboxMethod').onchange = (e) => {
+    if (e.target.value === 'POST') {
+      el('sandboxBodyRow').classList.remove('hidden');
+    } else {
+      el('sandboxBodyRow').classList.add('hidden');
+    }
+  };
+
   el('sandboxPresetSelect').onchange = (e) => {
     const val = e.target.value;
     const repo = state.selectedRepo?.full_name || 'merlinthedev848/MSuite-SIP';
     if (val === 'me') {
       el('sandboxPathInput').value = '/v1/me';
       el('sandboxMethod').value = 'GET';
+      el('sandboxBodyRow').classList.add('hidden');
     } else if (val === 'update') {
       el('sandboxPathInput').value = `/v1/repos/${repo}/update?current=1.0.0`;
       el('sandboxMethod').value = 'GET';
+      el('sandboxBodyRow').classList.add('hidden');
     } else if (val === 'latest') {
       el('sandboxPathInput').value = `/v1/repos/${repo}/releases/latest`;
       el('sandboxMethod').value = 'GET';
+      el('sandboxBodyRow').classList.add('hidden');
     }
   };
 

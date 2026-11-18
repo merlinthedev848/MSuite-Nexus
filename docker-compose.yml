@@ -7,5 +7,5 @@ services:
     ports:
       - "8080:8080"
     volumes:
-      - ./clients.json:/config/clients.json:ro
+      - ./clients.json:/config/clients.json
       - ./cache:/app/.cache

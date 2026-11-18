@@ -1,5 +1,6 @@
 import fs from 'node:fs';
 import path from 'node:path';
+import { randomUUID } from 'node:crypto';
 
 export class AuditLogger {
   constructor({ logFile, maxEntries = 1000 } = {}) {
@@ -9,7 +10,9 @@ export class AuditLogger {
 
     const dir = path.dirname(this.logFile);
     if (!fs.existsSync(dir)) {
-      fs.mkdirSync(dir, { recursive: true });
+      try {
+        fs.mkdirSync(dir, { recursive: true });
+      } catch {}
     }
 
     this.loadInitial();
@@ -24,13 +27,21 @@ export class AuditLogger {
         .filter(Boolean);
 
       const recent = lines.slice(-this.maxEntries);
-      this.inMemory = recent.map((l) => JSON.parse(l));
+      const parsed = [];
+      for (const line of recent) {
+        try {
+          parsed.push(JSON.parse(line));
+        } catch {
+          // Skip corrupted single line without invalidating whole log
+        }
+      }
+      this.inMemory = parsed;
     } catch {}
   }
 
   record({ actor = 'admin', ip, action, target, details = {} }) {
     const entry = {
-      id: Math.random().toString(36).substring(2, 10),
+      id: randomUUID(),
       timestamp: new Date().toISOString(),
       actor,
       ip: ip || 'internal',
