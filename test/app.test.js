@@ -12,6 +12,7 @@ import { EventBroker } from '../src/events.js';
 import { AssetCache } from '../src/asset-cache.js';
 import { AuditLogger } from '../src/audit.js';
 import { compareVersions } from '../src/version.js';
+import { NexusClient } from '../sdk/node/index.js';
 
 const TOKEN = 'ghp_test_token';
 const ADMIN_TOKEN = 'adm_super_secret_token_123';
@@ -485,4 +486,30 @@ test('Per-client custom rate limit enforcement', async () => {
 
   // Clean up
   await adminReq('/api/admin/clients/rate-limited-worker', 'DELETE');
+});
+
+test('NexusClient SDK end-to-end (updates, releases, downloads with SHA-256)', async () => {
+  const client = new NexusClient({ baseUrl: base, apiKey: KEY_A });
+
+  // 1. Verify Auth
+  const me = await client.verifyAuth();
+  assert.equal(me.name, 'a');
+
+  // 2. Check for update
+  const update = await client.checkForUpdate('acme/app', '1.0.0', { channel: 'stable' });
+  assert.equal(update.updateAvailable, true);
+  assert.equal(update.latestVersion, 'v1.2.0');
+  assert.equal(update.primaryAsset.name, 'app.zip');
+
+  // 3. Download asset with SHA-256 cryptographic verification
+  const downloadDest = path.join(testCacheDir, 'client_downloaded.bin');
+  const result = await client.downloadAsset('acme/app', 42, downloadDest, { verifySha256: true });
+  assert.equal(result.size, 18);
+  assert.equal(fs.readFileSync(downloadDest, 'utf8'), 'ZIPPY_DATA_CONTENT');
+  assert.ok(result.sha256 && result.sha256.length === 64);
+  assert.equal(result.verified, true);
+
+  // 4. Fetch raw file
+  const raw = await client.fetchRawFile('acme/app', 'config/settings.json', { ref: 'main' });
+  assert.deepEqual(JSON.parse(raw), { ref: 'main' });
 });

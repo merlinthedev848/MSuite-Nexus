@@ -4,10 +4,15 @@
   "description": "MSuite Nexus - GitHub private proxy and artifact hub for the MSuite product family.",
   "type": "module",
   "main": "src/server.js",
+  "exports": {
+    ".": "./src/server.js",
+    "./client": "./sdk/node/index.js"
+  },
   "scripts": {
     "start": "node src/server.js",
     "test": "node --test test/",
-    "new-key": "node scripts/new-key.js"
+    "new-key": "node scripts/new-key.js",
+    "provision-fleet": "node scripts/provision-fleet.js"
   },
   "engines": {
     "node": ">=20"
