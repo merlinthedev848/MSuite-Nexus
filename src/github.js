@@ -7,7 +7,7 @@ export class UpstreamError extends Error {
 }
 
 const REDIRECTS = new Set([301, 302, 303, 307, 308]);
-const USER_AGENT = 'MSuite-CodeHandler/2.0';
+const USER_AGENT = 'MSuite-Nexus/2.0';
 
 async function safeText(res) {
   try {

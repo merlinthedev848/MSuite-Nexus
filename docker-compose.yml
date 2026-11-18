@@ -1,7 +1,7 @@
 services:
-  codehandler:
+  nexus:
     build: .
-    image: msuite-codehandler:latest
+    image: msuite-nexus:latest
     restart: unless-stopped
     env_file: .env
     ports:

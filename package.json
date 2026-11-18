@@ -1,7 +1,7 @@
 {
-  "name": "msuite-codehandler",
-  "version": "1.0.0",
-  "description": "MSuite CodeHandler - GitHub private proxy. Holds a single GitHub token and lets MSuite apps fetch private releases, assets, raw files and archives using per-app API keys.",
+  "name": "msuite-nexus",
+  "version": "2.0.0",
+  "description": "MSuite Nexus - GitHub private proxy and artifact hub for the MSuite product family.",
   "type": "module",
   "main": "src/server.js",
   "scripts": {

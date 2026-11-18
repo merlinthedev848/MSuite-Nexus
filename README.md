@@ -1,8 +1,8 @@
-# MSuite CodeHandler 2.0
+# MSuite Nexus 2.0
 
-> **GitHub Private Proxy & Developer Portal for the MSuite Product Family**
+> **GitHub Private Proxy & Artifact Hub for the MSuite Product Family**
 
-MSuite CodeHandler securely bridges client applications (SIP, Sentinel, HoneyPot, MStream, etc.) with private GitHub repositories. It centralizes repository access, stores GitHub access tokens server-side, and serves private **release binaries, update checks, raw files, and source archives** using scoped, per-app API keys.
+MSuite Nexus securely bridges client applications (SIP, Sentinel, HoneyPot, MStream, etc.) with private GitHub repositories. It centralizes repository access, stores GitHub access tokens server-side, and serves private **release binaries, update checks, raw files, and source archives** using scoped, per-app API keys.
 
 ---
 
@@ -10,7 +10,7 @@ MSuite CodeHandler securely bridges client applications (SIP, Sentinel, HoneyPot
 
 - 🖥️ **Full Web UI / Admin Dashboard**: Modern, responsive dark-themed dashboard at `/` with real-time telemetry, interactive repository explorer, client key manager, and live request streaming.
 - 📡 **Real-Time Traffic Terminal (SSE)**: Live streaming of incoming proxy requests with status codes, latency, client identity, bandwidth, and pause/auto-scroll controls.
-- 🔀 **Multi-Token Failover & Rotation**: Configure a pool of GitHub PATs (`GITHUB_TOKENS=t1,t2`); CodeHandler automatically switches tokens if one approaches rate limits or hits 403.
+- 🔀 **Multi-Token Failover & Rotation**: Configure a pool of GitHub PATs (`GITHUB_TOKENS=t1,t2`); Nexus automatically switches tokens if one approaches rate limits or hits 403.
 - 🪝 **GitHub Webhook Receiver**: `/v1/webhook` endpoint with HMAC-SHA256 signature verification that automatically purges memory caches when releases are published or commits are pushed.
 - 🛠️ **Upstream Diagnostics & Cache Manager**: Built-in latency ping tool, token permission inspector, and pattern-based cache purger.
 - 📋 **Interactive Code Snippet Generator**: Copy-paste integration snippets in **cURL**, **PowerShell**, **Node.js**, and **Python** for any release asset.
@@ -21,12 +21,12 @@ MSuite CodeHandler securely bridges client applications (SIP, Sentinel, HoneyPot
 ## Architecture
 
 ```
-                                      ┌──▶ Upstream GitHub API (api.github.com)
-                                      │    (Token pool + ETag/TTL cache + Failover)
-MSuite App ──(API Key)──▶ CodeHandler ┼──▶ Signed Storage URLs (AWS S3/Azure)
-                          (Proxy Core)│    (Streaming binary pipeline, token never forwarded)
-                                      └──▶ Admin Dashboard / Web UI
-                                           (SSE Live Traffic, Metrics, Key Manager)
+                                   ┌──▶ Upstream GitHub API (api.github.com)
+                                   │    (Token pool + ETag/TTL cache + Failover)
+MSuite App ──(API Key)──▶ Nexus    ┼──▶ Signed Storage URLs (AWS S3/Azure)
+                       (Proxy Core)│    (Streaming binary pipeline, token never forwarded)
+                                   └──▶ Admin Dashboard / Web UI
+                                        (SSE Live Traffic, Metrics, Key Manager)
 ```
 
 ---
@@ -122,7 +122,7 @@ Requires `Authorization: Bearer <ADMIN_TOKEN>`.
 
 1. **Credential Isolation**: GitHub personal access tokens are stored strictly server-side in memory and environment variables. Client applications receive only cryptographically random `msk_...` keys.
 2. **One-Way Hashing**: Client keys are hashed with `SHA-256` prior to storage in `clients.json`. Plaintext keys are never stored on disk.
-3. **Token-Leak Prevention on Storage Redirects**: GitHub redirects asset downloads to temporary pre-signed Amazon S3 / Azure storage URLs. CodeHandler intercepts redirects manually and strips the `Authorization` header before fetching from storage.
+3. **Token-Leak Prevention on Storage Redirects**: GitHub redirects asset downloads to temporary pre-signed Amazon S3 / Azure storage URLs. Nexus intercepts redirects manually and strips the `Authorization` header before fetching from storage.
 4. **Content-Type Sniffing Protection**: Raw files are served with `X-Content-Type-Options: nosniff` and sanitised types to prevent XSS.
 5. **Path Traversal Protection**: Directory traversal (`..`), null bytes, and malicious ref names are blocked before reaching upstream.
 

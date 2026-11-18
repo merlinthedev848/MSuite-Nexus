@@ -39,7 +39,7 @@ const app = createApp({ config, clients, github, metrics, events, log });
 
 const server = app.listen(config.port, config.host, () => {
   log(`====================================================`);
-  log(`  MSuite CodeHandler 2.0 (GitHub Private Proxy)     `);
+  log(`  MSuite Nexus 2.0 (GitHub Private Proxy & Hub)     `);
   log(`====================================================`);
   log(`  Proxy API:    http://${config.host}:${config.port}/v1`);
   log(`  Web UI:       http://${config.host}:${config.port}/`);

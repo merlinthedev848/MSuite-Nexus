@@ -3,9 +3,9 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>MSuite CodeHandler | GitHub Private Proxy</title>
+  <title>MSuite Nexus | GitHub Private Proxy & Artifact Hub</title>
   <link rel="stylesheet" href="/app.css">
-  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🌌</text></svg>">
 </head>
 <body class="dark-theme">
   <div id="app">
@@ -13,10 +13,10 @@
     <header class="navbar">
       <div class="nav-brand">
         <div class="brand-logo">
-          <span class="logo-icon">⚡</span>
+          <span class="logo-icon">🌌</span>
           <div class="brand-titles">
             <span class="brand-family">MSUITE</span>
-            <span class="brand-product">CodeHandler</span>
+            <span class="brand-product">Nexus</span>
           </div>
         </div>
         <div class="connection-status" id="connectionStatus" title="SSE Realtime Stream">
@@ -354,7 +354,7 @@
               <h3>Memory Cache Management</h3>
               <button class="btn btn-danger btn-sm" id="btnPurgeAllCache">Purge Entire Cache</button>
             </div>
-            <p class="text-secondary text-sm">MSuite-CodeHandler caches GitHub JSON endpoints and ETags in memory with automatic TTL expiration.</p>
+            <p class="text-secondary text-sm">MSuite Nexus caches GitHub JSON endpoints and ETags in memory with automatic TTL expiration.</p>
             <div class="cache-stats-box" id="cacheStatsBox">
               <div class="cache-stat-item">
                 <span class="cache-stat-label">Cached Entries:</span>
@@ -381,7 +381,7 @@
               <span class="badge badge-success">Automated Cache Purge</span>
             </div>
             <p class="text-secondary text-sm">
-              Configure a webhook on your GitHub organization or repository. When a release is published or tags are pushed, GitHub notifies CodeHandler to instantly invalidate cached metadata without waiting for TTL expiration.
+              Configure a webhook on your GitHub organization or repository. When a release is published or tags are pushed, GitHub notifies Nexus to instantly invalidate cached metadata without waiting for TTL expiration.
             </p>
             <div class="webhook-info-grid">
               <div class="info-block">
@@ -491,7 +491,7 @@
           <h3>Admin Authentication</h3>
         </div>
         <div class="modal-body">
-          <p class="text-secondary text-sm">Enter the <code>ADMIN_TOKEN</code> configured on the MSuite CodeHandler server:</p>
+          <p class="text-secondary text-sm">Enter the <code>ADMIN_TOKEN</code> configured on the MSuite Nexus server:</p>
           <div class="form-group mt-3">
             <input type="password" id="inputAdminToken" class="form-input" placeholder="msuite_adm_...">
             <span class="form-hint" id="loginErrorMsg"></span>
