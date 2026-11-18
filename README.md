@@ -36,10 +36,18 @@ MSuite App ──(API Key)──▶ Nexus       ┼──▶ Local NVMe Asset Ca
 
 ## Quick Start
 
-### 1. Installation
+### 1. Installation & Prerequisites
+
+MSuite Nexus requires **Node.js >= 20** (for native `fetch`, crypto, and Express 5).
+
 ```bash
 git clone https://github.com/merlinthedev848/MSuite-Nexus.git
 cd MSuite-Nexus
+
+# If your server has an older Node version (e.g. Node 12 on default Ubuntu):
+bash scripts/install-node.sh
+
+# Or install manually:
 npm install
 ```
 
