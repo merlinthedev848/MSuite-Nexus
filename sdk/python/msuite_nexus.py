@@ -115,3 +115,22 @@ class NexusClient:
         owner, name = repo.split("/")
         clean_path = file_path.lstrip("/")
         return self._request(f"/v1/repos/{owner}/{name}/raw/{clean_path}?ref={ref}")
+
+    def call_service(self, service_id: str, sub_path: str = "", method: str = "GET", payload: Optional[Any] = None) -> Any:
+        """Route request through Nexus Service Gateway to upstream backend."""
+        clean_sub = f"/{sub_path.lstrip('/')}" if sub_path else ""
+        data = json.dumps(payload).encode("utf-8") if payload is not None else None
+        return self._request(f"/v1/services/{service_id}{clean_sub}", method=method, data=data)
+
+    def publish_message(self, topic: str, payload: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """Publish event to MSuite Real-Time Message Bus."""
+        data = json.dumps({"topic": topic, "payload": payload or {}}).encode("utf-8")
+        return self._request("/v1/bus/publish", method="POST", data=data)
+
+    def get_message_history(self, topic: Optional[str] = None, limit: int = 50) -> Any:
+        """Fetch message history for topic."""
+        params = {"limit": limit}
+        if topic:
+            params["topic"] = topic
+        qs = urllib.parse.urlencode(params)
+        return self._request(f"/v1/bus/history?{qs}")

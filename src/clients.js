@@ -2,7 +2,15 @@ import { createHash, randomBytes } from 'node:crypto';
 import fs from 'node:fs';
 import path from 'node:path';
 
+export const CORE_PERMISSIONS = ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'];
 export const PERMISSIONS = ['releases', 'raw', 'archive'];
+
+export function isValidPermission(p) {
+  if (CORE_PERMISSIONS.includes(p)) return true;
+  if (p === '*') return true;
+  if (p.startsWith('service:')) return true;
+  return false;
+}
 
 export const hashKey = (key) => createHash('sha256').update(String(key), 'utf8').digest('hex');
 export const generateKey = () => 'msk_' + randomBytes(32).toString('base64url');
@@ -91,7 +99,7 @@ export function parseClients(data) {
 
     const perms = c.permissions ?? PERMISSIONS;
     for (const p of perms) {
-      if (!PERMISSIONS.includes(p)) throw new Error(`client "${name}" has unknown permission "${p}"`);
+      if (!isValidPermission(p)) throw new Error(`client "${name}" has unknown permission "${p}"`);
     }
 
     const clientObj = {
@@ -230,7 +238,7 @@ export class ClientStore {
     if (this.byName.has(trimmedName.toLowerCase())) throw new Error(`Client "${trimmedName}" already exists`);
 
     for (const p of permissions) {
-      if (!PERMISSIONS.includes(p)) throw new Error(`Unknown permission: ${p}`);
+      if (!isValidPermission(p)) throw new Error(`Unknown permission: ${p}`);
     }
 
     const key = generateKey();
@@ -265,7 +273,7 @@ export class ClientStore {
     }
     if (permissions !== undefined) {
       for (const p of permissions) {
-        if (!PERMISSIONS.includes(p)) throw new Error(`Unknown permission: ${p}`);
+        if (!isValidPermission(p)) throw new Error(`Unknown permission: ${p}`);
       }
       client.permissions = new Set(permissions);
     }

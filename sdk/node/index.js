@@ -191,4 +191,43 @@ export class NexusClient {
     const res = await this._request(`/v1/repos/${encodeURIComponent(owner)}/${encodeURIComponent(name)}/raw/${cleanPath}?ref=${encodeURIComponent(ref)}`);
     return res.text();
   }
+
+  /**
+   * Forward a request to a backend microservice through the Nexus Service Gateway
+   * @param {string} serviceId - Registered service identifier
+   * @param {string} [subPath=''] - Route on upstream service (e.g. '/telemetry/heartbeat')
+   * @param {Object} [options] - Standard fetch options (method, headers, body)
+   */
+  async callService(serviceId, subPath = '', options = {}) {
+    const cleanSub = subPath ? `/${subPath.replace(/^\/+/, '')}` : '';
+    const res = await this._request(`/v1/services/${encodeURIComponent(serviceId)}${cleanSub}`, options);
+    const ct = res.headers.get('content-type') || '';
+    if (ct.includes('application/json')) return res.json();
+    return res.text();
+  }
+
+  /**
+   * Publish an event to the MSuite Real-Time Message Bus
+   * @param {string} topic - Event topic (e.g. 'alerts.threat', 'sync.status')
+   * @param {Object} payload - Message payload data
+   */
+  async publishMessage(topic, payload = {}) {
+    const res = await this._request('/v1/bus/publish', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic, payload }),
+    });
+    return res.json();
+  }
+
+  /**
+   * Retrieve recent event history for a topic
+   */
+  async getMessageHistory(topic = null, limit = 50) {
+    const qs = new URLSearchParams();
+    if (topic) qs.set('topic', topic);
+    if (limit) qs.set('limit', String(limit));
+    const res = await this._request(`/v1/bus/history?${qs}`);
+    return res.json();
+  }
 }

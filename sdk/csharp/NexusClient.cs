@@ -98,6 +98,31 @@ namespace MSuite.Nexus
             return destFilePath;
         }
 
+        public async Task<string> CallServiceAsync(string serviceId, string subPath = "", HttpMethod method = null, HttpContent content = null, CancellationToken ct = default)
+        {
+            var cleanSub = string.IsNullOrEmpty(subPath) ? "" : "/" + subPath.TrimStart('/');
+            var url = $"{_baseUrl}/v1/services/{Uri.EscapeDataString(serviceId)}{cleanSub}";
+
+            var request = new HttpRequestMessage(method ?? HttpMethod.Get, url);
+            if (content != null) request.Content = content;
+
+            var response = await _http.SendAsync(request, ct);
+            response.EnsureSuccessStatusCode();
+            return await response.Content.ReadAsStringAsync(ct);
+        }
+
+        public async Task<JsonElement> PublishMessageAsync(string topic, object payload, CancellationToken ct = default)
+        {
+            var url = $"{_baseUrl}/v1/bus/publish";
+            var body = JsonSerializer.Serialize(new { topic, payload });
+            var content = new StringContent(body, System.Text.Encoding.UTF8, "application/json");
+
+            var response = await _http.PostAsync(url, content, ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonDocument.Parse(json).RootElement;
+        }
+
         public void Dispose()
         {
             _http?.Dispose();

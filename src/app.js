@@ -46,7 +46,7 @@ function validRef(ref) {
     !ref.includes('..') && !/[\s~^:?*\[\\]/.test(ref) && !ref.startsWith('/') && !ref.endsWith('/');
 }
 
-export function createApp({ config, clients, github, metrics, events, assetCache = null, audit = null, log = console.log }) {
+export function createApp({ config, clients, github, metrics, events, assetCache = null, audit = null, gateway = null, bus = null, log = console.log }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -175,7 +175,7 @@ export function createApp({ config, clients, github, metrics, events, assetCache
 
   // Mount Admin API router
   if (metrics && events) {
-    app.use('/api/admin', createAdminRouter({ config, clients, github, metrics, events, assetCache, audit, log }));
+    app.use('/api/admin', createAdminRouter({ config, clients, github, metrics, events, assetCache, audit, gateway, bus, log }));
   }
 
   // --- Client /v1 API ---
@@ -443,6 +443,58 @@ export function createApp({ config, clients, github, metrics, events, assetCache
     const path = `${repoPath(req)}/${format === 'zip' ? 'zipball' : 'tarball'}${ref ? `/${enc(ref)}` : ''}`;
     const upstream = await github.stream(path, { accept: 'application/vnd.github+json' });
     await pipeUpstream(upstream, res);
+  }));
+
+  // --- MSuite Universal Service Gateway (Traffic Forwarding) ---
+  const handleServiceForward = wrap(async (req, res) => {
+    if (!gateway) throw new HttpError(503, 'gateway_disabled', 'Service Gateway is not enabled');
+    const service = gateway.getService(req.params.serviceId);
+    if (!service) throw new HttpError(404, 'service_not_found', `Service "${req.params.serviceId}" not found`);
+    if (!gateway.canClientAccess(service, req.client)) {
+      throw new HttpError(403, 'forbidden', `Client "${req.client.name}" is not permitted to access service "${service.id}"`);
+    }
+    await gateway.forwardRequest(service, req, res);
+  });
+
+  v1.all('/services/:serviceId', handleServiceForward);
+  v1.all('/services/:serviceId/*path', handleServiceForward);
+
+  // --- MSuite Real-Time Message Bus (Data Transport) ---
+  v1.post('/bus/publish', wrap(async (req, res) => {
+    if (!bus) throw new HttpError(503, 'bus_disabled', 'Message Bus is not enabled');
+    const hasPermission = req.client.permissions.has('bus:publish') || req.client.permissions.has('*');
+    if (!hasPermission) throw new HttpError(403, 'forbidden', 'Client lacking bus:publish permission');
+
+    const { topic, payload } = req.body || {};
+    if (!topic) throw new HttpError(400, 'bad_request', 'Field "topic" is required');
+
+    const message = bus.publish({ topic, sender: req.client.name, payload: payload ?? {} });
+    events?.broadcast('bus_message', { topic: message.topic, sender: message.sender, time: message.timestamp });
+    res.status(202).json({ ok: true, messageId: message.id, topic: message.topic, timestamp: message.timestamp });
+  }));
+
+  v1.get('/bus/subscribe', (req, res, next) => {
+    if (!bus) return next(new HttpError(503, 'bus_disabled', 'Message Bus is not enabled'));
+    const hasPermission = req.client.permissions.has('bus:subscribe') || req.client.permissions.has('*');
+    if (!hasPermission) return next(new HttpError(403, 'forbidden', 'Client lacking bus:subscribe permission'));
+
+    res.writeHead(200, {
+      'Content-Type': 'text/event-stream',
+      'Cache-Control': 'no-cache, no-transform',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+    res.flushHeaders?.();
+
+    const rawTopics = req.query.topics ? String(req.query.topics).split(',') : ['*'];
+    bus.addSubscriber(res, rawTopics, req.client.name);
+  });
+
+  v1.get('/bus/history', wrap(async (req, res) => {
+    if (!bus) throw new HttpError(503, 'bus_disabled', 'Message Bus is not enabled');
+    const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
+    const topic = req.query.topic ? String(req.query.topic) : null;
+    res.json(bus.getRecentMessages({ topic, limit }));
   }));
 
   app.use('/v1', v1);

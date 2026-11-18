@@ -154,6 +154,12 @@ function loadActiveTabData() {
     case 'sandbox':
       populateSandboxClientSelect();
       break;
+    case 'services':
+      loadServices();
+      break;
+    case 'bus':
+      loadBus();
+      break;
     case 'live-logs':
       renderLogsTable();
       break;
@@ -872,6 +878,126 @@ async function purgeCache(pattern = null) {
   }
 }
 
+// 8. SERVICE GATEWAY
+async function loadServices() {
+  const tbody = el('servicesTableBody');
+  tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">Loading registered services...</td></tr>';
+  try {
+    const list = await api('/api/admin/services');
+    state.services = list;
+    renderServicesTable(list);
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="8" class="text-center text-danger">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+function renderServicesTable(list) {
+  const tbody = el('servicesTableBody');
+  const filter = (el('serviceSearchInput')?.value || '').toLowerCase();
+  const filtered = list.filter((s) => s.id.toLowerCase().includes(filter) || s.name.toLowerCase().includes(filter) || s.target.toLowerCase().includes(filter));
+
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No upstream services registered yet</td></tr>';
+    return;
+  }
+
+  tbody.innerHTML = filtered.map((s) => `
+    <tr>
+      <td>${s.enabled ? '<span class="badge badge-success">Online</span>' : '<span class="badge badge-danger">Disabled</span>'}</td>
+      <td><code>${escapeHtml(s.id)}</code></td>
+      <td><strong>${escapeHtml(s.name)}</strong><br><span class="text-secondary text-xs">${escapeHtml(s.description || '—')}</span></td>
+      <td><code>${escapeHtml(s.target)}</code></td>
+      <td><span class="badge badge-outline">/v1/services/${escapeHtml(s.id)}/*</span></td>
+      <td><code>${escapeHtml(s.allowedClients.join(', '))}</code></td>
+      <td><span class="text-xs text-muted">${s.authHeaderMasked ? '🔑 Injected' : 'None'}</span></td>
+      <td class="text-right">
+        <button class="btn-sm btn-outline btn-test-service" data-id="${escapeHtml(s.id)}">Test Ping</button>
+        <button class="btn-sm btn-danger btn-delete-service" data-id="${escapeHtml(s.id)}">Delete</button>
+      </td>
+    </tr>
+  `).join('');
+
+  tbody.querySelectorAll('.btn-test-service').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.textContent = 'Testing...';
+      try {
+        const res = await api(`/api/admin/services/${encodeURIComponent(btn.dataset.id)}/test`, { method: 'POST' });
+        toast(`Service ${btn.dataset.id}: HTTP ${res.status} (${res.latencyMs}ms)`, res.ok ? 'success' : 'warning');
+      } catch (e) {
+        toast(`Ping failed: ${e.message}`, 'danger');
+      } finally {
+        btn.textContent = 'Test Ping';
+      }
+    };
+  });
+
+  tbody.querySelectorAll('.btn-delete-service').forEach((btn) => {
+    btn.onclick = async () => {
+      if (!confirm(`Delete upstream service "${btn.dataset.id}"?`)) return;
+      try {
+        await api(`/api/admin/services/${encodeURIComponent(btn.dataset.id)}`, { method: 'DELETE' });
+        toast(`Service ${btn.dataset.id} deleted`, 'success');
+        loadServices();
+      } catch (e) {
+        toast(e.message, 'danger');
+      }
+    };
+  });
+}
+
+// 9. MESSAGE BUS
+async function loadBus() {
+  const tbody = el('busHistoryTableBody');
+  tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">Loading message stream...</td></tr>';
+  try {
+    const data = await api('/api/admin/bus');
+    if (!data.recent || !data.recent.length) {
+      tbody.innerHTML = '<tr><td colspan="5" class="text-center text-muted">No message bus events recorded yet</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.recent.map((m) => `
+      <tr>
+        <td class="text-muted text-xs">${new Date(m.timestamp).toLocaleTimeString()}</td>
+        <td><span class="badge">${escapeHtml(m.topic)}</span></td>
+        <td><strong>${escapeHtml(m.sender)}</strong></td>
+        <td><code>${escapeHtml(m.id.slice(0, 8))}...</code></td>
+        <td class="text-xs"><code>${escapeHtml(JSON.stringify(m.payload))}</code></td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="5" class="text-center text-danger">${escapeHtml(e.message)}</td></tr>`;
+  }
+}
+
+async function publishBusEvent() {
+  const topic = el('busTopicInput').value.trim();
+  const rawPayload = el('busPayloadInput').value.trim();
+  if (!topic) return toast('Event topic is required', 'warning');
+
+  let payload = {};
+  if (rawPayload) {
+    try {
+      payload = JSON.parse(rawPayload);
+    } catch {
+      payload = { text: rawPayload };
+    }
+  }
+
+  try {
+    await api('/api/admin/bus/publish', {
+      method: 'POST',
+      body: { topic, payload },
+    });
+    toast(`Event published to topic "${topic}"`, 'success');
+    el('busTopicInput').value = '';
+    el('busPayloadInput').value = '';
+    loadBus();
+  } catch (e) {
+    toast(e.message, 'danger');
+  }
+}
+
 // Event Listeners setup
 function setupEventListeners() {
   // Login
@@ -890,6 +1016,7 @@ function setupEventListeners() {
     if (e.key === 'Escape') {
       el('modalAddClient').classList.add('hidden');
       el('modalKeyDisplay').classList.add('hidden');
+      el('modalAddService')?.classList.add('hidden');
       if (state.adminToken) hideAdminLoginModal();
     }
   });
@@ -927,6 +1054,9 @@ function setupEventListeners() {
     if (el('permReleases').checked) permissions.push('releases');
     if (el('permRaw').checked) permissions.push('raw');
     if (el('permArchive').checked) permissions.push('archive');
+    if (el('permServices')?.checked) permissions.push('services');
+    if (el('permBusPub')?.checked) permissions.push('bus:publish');
+    if (el('permBusSub')?.checked) permissions.push('bus:subscribe');
 
     if (!name) return toast('Client name is required', 'warning');
     if (!repos.length) return toast('At least one repository pattern is required', 'warning');
@@ -1042,6 +1172,44 @@ function setupEventListeners() {
 
   // Audit
   el('btnRefreshAudit').onclick = loadAuditLogs;
+
+  // Services Gateway
+  el('btnOpenAddServiceModal').onclick = () => {
+    el('newServiceId').value = '';
+    el('newServiceName').value = '';
+    el('newServiceTarget').value = '';
+    el('newServiceAuth').value = '';
+    el('newServiceAllowedClients').value = '*';
+    el('modalAddService').classList.remove('hidden');
+    el('newServiceId').focus();
+  };
+  el('btnCloseAddServiceModal').onclick = () => el('modalAddService').classList.add('hidden');
+  el('btnCancelAddService').onclick = () => el('modalAddService').classList.add('hidden');
+  el('btnSaveNewService').onclick = async () => {
+    const id = el('newServiceId').value.trim();
+    const name = el('newServiceName').value.trim();
+    const target = el('newServiceTarget').value.trim();
+    const authHeader = el('newServiceAuth').value.trim();
+    const allowedClients = el('newServiceAllowedClients').value.split(',').map((s) => s.trim()).filter(Boolean);
+
+    if (!id || !target) return toast('Service ID and Target URL are required', 'warning');
+    try {
+      await api('/api/admin/services', {
+        method: 'POST',
+        body: { id, name, target, authHeader, allowedClients },
+      });
+      el('modalAddService').classList.add('hidden');
+      toast(`Service "${id}" registered successfully`, 'success');
+      loadServices();
+    } catch (e) {
+      toast(e.message, 'danger');
+    }
+  };
+  if (el('serviceSearchInput')) el('serviceSearchInput').oninput = () => renderServicesTable(state.services || []);
+
+  // Message Bus
+  el('btnPublishBusEvent').onclick = publishBusEvent;
+  el('btnRefreshBus').onclick = loadBus;
 
   // Diagnostics
   el('btnRunDiagnostics').onclick = runDiagnostics;

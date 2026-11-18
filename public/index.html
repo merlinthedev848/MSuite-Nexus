@@ -62,6 +62,12 @@
       <button class="tab-btn" data-tab="sandbox">
         <span class="tab-icon">🧪</span> API Sandbox
       </button>
+      <button class="tab-btn" data-tab="services">
+        <span class="tab-icon">🌐</span> Service Gateway
+      </button>
+      <button class="tab-btn" data-tab="bus">
+        <span class="tab-icon">⚡</span> Message Bus
+      </button>
       <button class="tab-btn" data-tab="live-logs">
         <span class="tab-icon">📡</span> Live Traffic Stream
         <span class="badge-counter" id="logCounter">0</span>
@@ -387,6 +393,91 @@
         </div>
       </section>
 
+      <!-- 4B. SERVICE GATEWAY TAB -->
+      <section id="tab-services" class="tab-content">
+        <div class="tab-action-bar">
+          <div class="search-bar">
+            <input type="text" id="serviceSearchInput" placeholder="Filter upstream services...">
+          </div>
+          <button class="btn btn-primary" id="btnOpenAddServiceModal">
+            <span>+</span> Register Service
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="table-responsive">
+            <table class="data-table" id="servicesTable">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Service ID</th>
+                  <th>Name</th>
+                  <th>Upstream Target URL</th>
+                  <th>Proxy Route</th>
+                  <th>Allowed Clients</th>
+                  <th>Auth Injection</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="servicesTableBody">
+                <tr><td colspan="8" class="text-center text-muted">Loading registered services...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4C. MESSAGE BUS TAB -->
+      <section id="tab-bus" class="tab-content">
+        <div class="card mb-4">
+          <div class="card-header">
+            <div>
+              <h3>Real-Time Event Publisher</h3>
+              <p class="text-secondary text-sm">Broadcast inter-application events across the MSuite product fleet.</p>
+            </div>
+          </div>
+          <div class="sandbox-controls-grid">
+            <div class="form-group">
+              <label class="form-label" for="busTopicInput">Event Topic *</label>
+              <input type="text" id="busTopicInput" class="form-input" placeholder="e.g. alerts.threat, sip.status, config.sync">
+            </div>
+            <div class="form-group full-width">
+              <label class="form-label" for="busPayloadInput">JSON Payload</label>
+              <textarea id="busPayloadInput" class="form-input" rows="2" placeholder='{"severity": "high", "ip": "1.2.3.4"}' style="font-family: monospace;"></textarea>
+            </div>
+            <div class="form-group full-width">
+              <button class="btn btn-primary" id="btnPublishBusEvent">Broadcast Event</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Message Stream &amp; History</h3>
+              <p class="text-secondary text-sm">Recent messages dispatched across connected MSuite products.</p>
+            </div>
+            <button class="btn-sm btn-outline" id="btnRefreshBus">Refresh</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="busHistoryTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Topic</th>
+                  <th>Sender</th>
+                  <th>Message ID</th>
+                  <th>Payload</th>
+                </tr>
+              </thead>
+              <tbody id="busHistoryTableBody">
+                <tr><td colspan="5" class="text-center text-muted">No message bus events recorded yet</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
       <!-- 5. LIVE LOGS TAB -->
       <section id="tab-live-logs" class="tab-content">
         <div class="tab-action-bar">
@@ -622,12 +713,66 @@
                 <input type="checkbox" id="permArchive" checked>
                 <span>Source Archives (zip/tar)</span>
               </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permServices" checked>
+                <span>Service Gateway</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permBusPub" checked>
+                <span>Bus Publish</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permBusSub" checked>
+                <span>Bus Subscribe</span>
+              </label>
             </div>
           </div>
         </div>
         <div class="modal-footer">
           <button class="btn btn-ghost" id="btnCancelAddClient">Cancel</button>
           <button class="btn btn-primary" id="btnSaveNewClient">Generate Key</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ADD SERVICE -->
+    <div class="modal-backdrop hidden" id="modalAddService">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Register Upstream Service</h3>
+          <button class="modal-close" id="btnCloseAddServiceModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="newServiceId">Service ID *</label>
+            <input type="text" id="newServiceId" class="form-input" placeholder="e.g. telemetry, signaling, ai-service">
+            <span class="form-hint">Used in URL route: <code>/v1/services/{id}/*</code></span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newServiceName">Display Name</label>
+            <input type="text" id="newServiceName" class="form-input" placeholder="e.g. Sentinel Ingestion Daemon">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newServiceTarget">Target URL (Internal / Cloud Backend) *</label>
+            <input type="text" id="newServiceTarget" class="form-input" placeholder="http://10.0.1.15:8000 or https://internal-api.example.com">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newServiceAuth">Injected Authorization Header (Optional)</label>
+            <input type="text" id="newServiceAuth" class="form-input" placeholder="Bearer backend_secret_token">
+            <span class="form-hint">Nexus will inject this header when forwarding to the backend, so clients don't hold backend credentials.</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newServiceAllowedClients">Allowed Client Apps</label>
+            <input type="text" id="newServiceAllowedClients" class="form-input" value="*" placeholder="* or msuite-sip, msuite-sentinel">
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btnCancelAddService">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveNewService">Register Service</button>
         </div>
       </div>
     </div>

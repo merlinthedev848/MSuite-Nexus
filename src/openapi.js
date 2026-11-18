@@ -259,6 +259,90 @@ export function generateOpenApiSpec({ publicBaseUrl = '' } = {}) {
           },
         },
       },
+      '/v1/services/{serviceId}/{path}': {
+        get: {
+          summary: 'Universal Service Gateway (Forward Traffic)',
+          description: 'Securely proxies requests to registered backend microservices, injecting upstream secrets and verifying client permissions.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'serviceId', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'path', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: {
+            '200': { description: 'Forwarded service response' },
+            '403': { description: 'Client not permitted to access this backend service' },
+            '404': { description: 'Service not found in registry' },
+          },
+        },
+        post: {
+          summary: 'Universal Service Gateway POST',
+          description: 'Forwards POST requests and payloads to upstream microservice.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'serviceId', in: 'path', required: true, schema: { type: 'string' } },
+            { name: 'path', in: 'path', required: true, schema: { type: 'string' } },
+          ],
+          responses: {
+            '200': { description: 'Forwarded service response' },
+          },
+        },
+      },
+      '/v1/bus/publish': {
+        post: {
+          summary: 'Publish Message to Real-Time Bus',
+          description: 'Publishes an event or message to a topic on the MSuite central data exchange.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          requestBody: {
+            required: true,
+            content: {
+              'application/json': {
+                schema: {
+                  type: 'object',
+                  properties: {
+                    topic: { type: 'string', example: 'alerts.threats' },
+                    payload: { type: 'object', example: { ip: '1.2.3.4', reason: 'brute-force' } },
+                  },
+                  required: ['topic'],
+                },
+              },
+            },
+          },
+          responses: {
+            '202': { description: 'Message accepted and dispatched to subscribers' },
+            '403': { description: 'Client lacking bus:publish permission' },
+          },
+        },
+      },
+      '/v1/bus/subscribe': {
+        get: {
+          summary: 'Subscribe to Message Bus Topics (SSE)',
+          description: 'Opens a persistent Server-Sent Events stream receiving real-time messages matching subscribed topics.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'topics', in: 'query', schema: { type: 'string', example: 'alerts.*,config.sync' } },
+          ],
+          responses: {
+            '200': {
+              description: 'SSE stream of real-time messages',
+              content: { 'text/event-stream': {} },
+            },
+          },
+        },
+      },
+      '/v1/bus/history': {
+        get: {
+          summary: 'Fetch Message Bus History',
+          description: 'Retrieves recent messages from the in-memory ring buffer for a given topic.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          parameters: [
+            { name: 'topic', in: 'query', schema: { type: 'string', example: 'alerts.*' } },
+            { name: 'limit', in: 'query', schema: { type: 'integer', default: 50 } },
+          ],
+          responses: {
+            '200': { description: 'List of recent messages' },
+          },
+        },
+      },
     },
   };
 }

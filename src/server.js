@@ -5,6 +5,8 @@ import { MetricsCollector } from './metrics.js';
 import { EventBroker } from './events.js';
 import { AssetCache } from './asset-cache.js';
 import { AuditLogger } from './audit.js';
+import { ServiceGateway } from './gateway.js';
+import { MessageBus } from './bus.js';
 import { createApp } from './app.js';
 
 const log = (msg) => console.log(msg);
@@ -37,6 +39,8 @@ clients.watch(log);
 
 const metrics = new MetricsCollector();
 const events = new EventBroker();
+const bus = new MessageBus();
+const gateway = new ServiceGateway({ log });
 const audit = new AuditLogger({ logFile: config.auditLogFile });
 const assetCache = new AssetCache({
   cacheDir: config.assetCacheDir,
@@ -61,6 +65,8 @@ const app = createApp({
   events,
   assetCache,
   audit,
+  gateway,
+  bus,
   log,
 });
 

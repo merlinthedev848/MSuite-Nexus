@@ -3,6 +3,7 @@ node_modules
 .env.*
 !.env.example
 clients.json
+services.json
 .cache
 *.log
 .DS_Store

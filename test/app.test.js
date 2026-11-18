@@ -11,6 +11,8 @@ import { MetricsCollector } from '../src/metrics.js';
 import { EventBroker } from '../src/events.js';
 import { AssetCache } from '../src/asset-cache.js';
 import { AuditLogger } from '../src/audit.js';
+import { ServiceGateway } from '../src/gateway.js';
+import { MessageBus } from '../src/bus.js';
 import { compareVersions } from '../src/version.js';
 import { NexusClient } from '../sdk/node/index.js';
 
@@ -24,7 +26,7 @@ const KEY_IP_LOCKED = 'msk_client_iplocked';
 const seen = [];
 
 let ghServer, ghPort, appServer, base;
-let testMetrics, testEvents, testAssetCache, testAudit;
+let testMetrics, testEvents, testAssetCache, testAudit, testGateway, testBus;
 const testCacheDir = path.join(process.cwd(), '.cache', 'test_assets');
 
 const release = (tag, extra = {}) => ({
@@ -121,6 +123,8 @@ before(async () => {
 
   testMetrics = new MetricsCollector();
   testEvents = new EventBroker();
+  testBus = new MessageBus();
+  testGateway = new ServiceGateway({ configFile: path.join(testCacheDir, 'services.json'), log: () => {} });
   testAudit = new AuditLogger({ logFile: path.join(testCacheDir, 'audit.jsonl') });
   testAssetCache = new AssetCache({ cacheDir: testCacheDir, enabled: true, log: () => {} });
 
@@ -139,6 +143,8 @@ before(async () => {
     events: testEvents,
     assetCache: testAssetCache,
     audit: testAudit,
+    gateway: testGateway,
+    bus: testBus,
     log: () => {},
   });
 
@@ -512,4 +518,86 @@ test('NexusClient SDK end-to-end (updates, releases, downloads with SHA-256)', a
   // 4. Fetch raw file
   const raw = await client.fetchRawFile('acme/app', 'config/settings.json', { ref: 'main' });
   assert.deepEqual(JSON.parse(raw), { ref: 'main' });
+});
+
+test('ServiceGateway: registration, traffic proxying, auth injection & client restrictions', async () => {
+  // Spin up a mock backend microservice (e.g. SIP signaling or telemetry)
+  const backendReceived = [];
+  const backendServer = http.createServer((req, res) => {
+    backendReceived.push({
+      url: req.url,
+      method: req.method,
+      auth: req.headers.authorization,
+      nexusClient: req.headers['x-nexus-client'],
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ status: 'telemetry_received', ok: true }));
+  });
+
+  try {
+    await new Promise((r) => backendServer.listen(0, '127.0.0.1', r));
+    const backendPort = backendServer.address().port;
+
+    // 1. Admin registers the service with injected auth token
+    const regRes = await adminReq('/api/admin/services', 'POST', {
+      id: 'telemetry',
+      name: 'Sentinel Ingestion',
+      target: `http://127.0.0.1:${backendPort}`,
+      authHeader: 'Bearer internal_secret_backend_token',
+      allowedClients: ['a'], // only client 'a' permitted
+    });
+    assert.equal(regRes.status, 201);
+
+    // 2. Grant client 'a' services permission via Admin API
+    await adminReq('/api/admin/clients/a', 'PUT', {
+      permissions: ['releases', 'raw', 'archive', 'services'],
+    });
+
+    // 3. Client 'a' proxies a request through Nexus to the backend service
+    const client = new NexusClient({ baseUrl: base, apiKey: KEY_A });
+    const serviceResp = await client.callService('telemetry', '/ping', { method: 'POST' });
+    assert.equal(serviceResp.ok, true);
+    assert.equal(serviceResp.status, 'telemetry_received');
+
+    // Verify backend received injected credentials and client identity
+    assert.equal(backendReceived.length, 1);
+    assert.equal(backendReceived[0].url, '/ping');
+    assert.equal(backendReceived[0].auth, 'Bearer internal_secret_backend_token');
+    assert.equal(backendReceived[0].nexusClient, 'a');
+
+    // 4. Client 'b' tries to call service -> rejected with 403 (unauthorized client)
+    const clientB = new NexusClient({ baseUrl: base, apiKey: KEY_B });
+    await assert.rejects(
+      () => clientB.callService('telemetry', '/ping'),
+      (err) => err.status === 403 || /forbidden|permitted/i.test(err.message)
+    );
+  } finally {
+    backendServer.close();
+  }
+});
+
+test('MessageBus: publish events, history, and topic isolation', async () => {
+  // Grant client 'a' bus permissions
+  await adminReq('/api/admin/clients/a', 'PUT', {
+    permissions: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'],
+  });
+
+  const client = new NexusClient({ baseUrl: base, apiKey: KEY_A });
+
+  // 1. Client publishes threat alert
+  const pubRes = await client.publishMessage('alerts.threat', { ip: '198.51.100.1', severity: 'critical' });
+  assert.equal(pubRes.ok, true);
+  assert.equal(pubRes.topic, 'alerts.threat');
+
+  // 2. Fetch history
+  const history = await client.getMessageHistory('alerts.*');
+  assert.ok(history.length >= 1);
+  assert.equal(history[0].topic, 'alerts.threat');
+  assert.equal(history[0].payload.ip, '198.51.100.1');
+  assert.equal(history[0].sender, 'a');
+
+  // 3. Admin can inspect bus stats
+  const adminBus = await (await adminReq('/api/admin/bus')).json();
+  assert.equal(adminBus.enabled, true);
+  assert.ok(adminBus.stats.topics.includes('alerts.threat'));
 });

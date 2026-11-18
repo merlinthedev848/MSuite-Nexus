@@ -2,7 +2,7 @@ import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 
-export function createAdminRouter({ config, clients, github, metrics, events, assetCache = null, audit = null, log = console.log }) {
+export function createAdminRouter({ config, clients, github, metrics, events, assetCache = null, audit = null, gateway = null, bus = null, log = console.log }) {
   const router = express.Router();
   router.use(express.json());
 
@@ -83,6 +83,8 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
       adminTokenGenerated: Boolean(config.adminTokenGenerated),
       activeClientsCount: clients.byHash.size,
       totalClientsCount: clients.byName.size,
+      gatewayServicesCount: gateway ? gateway.services.size : 0,
+      busStats: bus ? bus.stats : null,
     });
   });
 
@@ -90,6 +92,93 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
   router.get('/audit', (req, res) => {
     const limit = Math.min(parseInt(req.query.limit, 10) || 50, 200);
     res.json(audit ? audit.getEntries({ limit }) : []);
+  });
+
+  // --- Service Gateway Routes ---
+  router.get('/services', (req, res) => {
+    res.json(gateway ? gateway.getAllServices() : []);
+  });
+
+  router.post('/services', (req, res) => {
+    if (!gateway) return res.status(503).json({ error: 'gateway_disabled' });
+    try {
+      const created = gateway.registerService(req.body || {});
+      events.broadcast('service_change', { action: 'register', id: created.id });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'SERVICE_REGISTERED', target: created.id, details: { target: created.target } });
+      res.status(201).json({ ok: true, service: created });
+    } catch (e) {
+      res.status(400).json({ error: 'bad_request', message: e.message });
+    }
+  });
+
+  router.put('/services/:id', (req, res) => {
+    if (!gateway) return res.status(503).json({ error: 'gateway_disabled' });
+    try {
+      const updated = gateway.updateService(req.params.id, req.body || {});
+      events.broadcast('service_change', { action: 'update', id: req.params.id });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'SERVICE_UPDATED', target: req.params.id });
+      res.json({ ok: true, service: updated });
+    } catch (e) {
+      res.status(400).json({ error: 'bad_request', message: e.message });
+    }
+  });
+
+  router.delete('/services/:id', (req, res) => {
+    if (!gateway) return res.status(503).json({ error: 'gateway_disabled' });
+    const deleted = gateway.deleteService(req.params.id);
+    if (deleted) {
+      events.broadcast('service_change', { action: 'delete', id: req.params.id });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'SERVICE_DELETED', target: req.params.id });
+    }
+    res.json({ ok: true, deleted });
+  });
+
+  router.post('/services/:id/test', async (req, res) => {
+    if (!gateway) return res.status(503).json({ error: 'gateway_disabled' });
+    const service = gateway.getService(req.params.id);
+    if (!service) return res.status(404).json({ error: 'service_not_found' });
+
+    const start = Date.now();
+    try {
+      const headers = {};
+      if (service.authHeader) headers['Authorization'] = service.authHeader;
+      const upstreamRes = await fetch(service.target, { method: 'GET', headers, redirect: 'manual' });
+      res.json({
+        ok: upstreamRes.ok,
+        status: upstreamRes.status,
+        latencyMs: Date.now() - start,
+        target: service.target,
+      });
+    } catch (e) {
+      res.status(502).json({
+        ok: false,
+        error: e.message,
+        latencyMs: Date.now() - start,
+        target: service.target,
+      });
+    }
+  });
+
+  // --- Real-Time Message Bus Routes ---
+  router.get('/bus', (req, res) => {
+    if (!bus) return res.json({ enabled: false });
+    const recent = bus.getRecentMessages({ limit: 50 });
+    res.json({
+      enabled: true,
+      stats: bus.stats,
+      recent,
+    });
+  });
+
+  router.post('/bus/publish', (req, res) => {
+    if (!bus) return res.status(503).json({ error: 'bus_disabled' });
+    const { topic, payload } = req.body || {};
+    if (!topic) return res.status(400).json({ error: 'bad_request', message: 'topic required' });
+
+    const msg = bus.publish({ topic, sender: 'admin', payload: payload ?? {} });
+    events.broadcast('bus_message', { topic: msg.topic, sender: msg.sender, time: msg.timestamp });
+    audit?.record({ actor: 'admin', ip: req.ip, action: 'BUS_EVENT_PUBLISHED', target: msg.topic });
+    res.status(201).json({ ok: true, message: msg });
   });
 
   // Client management CRUD

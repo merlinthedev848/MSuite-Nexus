@@ -100,6 +100,10 @@ All `/v1` endpoints require authentication via:
 | `GET` | `/v1/repos/:owner/:repo/raw/*path?ref=main` | `raw` | Streams raw file content with safe Content-Type |
 | `GET` | `/v1/repos/:owner/:repo/archive?ref=main&format=zip` | `archive` | Streams repo source archive (`zip` or `tar`) |
 | `POST` | `/v1/webhook` | *none / HMAC* | GitHub webhook receiver for instant cache invalidation |
+| `ALL` | `/v1/services/:serviceId/*` | `services` or `service:<id>` | **Universal Service Gateway**: Proxies traffic to internal microservices with auth token injection & client restriction |
+| `POST` | `/v1/bus/publish` | `bus:publish` | **Real-Time Message Bus**: Publishes structured JSON event to pub/sub topic (e.g. `alerts.threat`) |
+| `GET` | `/v1/bus/subscribe?topics=a.*,b.*` | `bus:subscribe` | **Real-Time Message Bus**: SSE live event stream subscriber with pattern matching |
+| `GET` | `/v1/bus/history?topic=alerts.*&limit=50` | *any* | Retrieves recent in-memory event buffer for replay |
 
 ---
 
@@ -115,6 +119,13 @@ Requires `Authorization: Bearer <ADMIN_TOKEN>`.
 - `PUT /api/admin/clients/:name` – Update repos, permissions, description, or disable client
 - `POST /api/admin/clients/:name/rotate-key` – Invalidate previous key and issue a new one
 - `DELETE /api/admin/clients/:name` – Remove client
+- `GET /api/admin/services` – List registered backend microservices
+- `POST /api/admin/services` – Register/configure upstream microservice with injected auth header & client allow-list
+- `PUT /api/admin/services/:id` – Update service destination or client restrictions
+- `DELETE /api/admin/services/:id` – Deregister microservice
+- `POST /api/admin/services/:id/test` – Gateway health probe to upstream service
+- `GET /api/admin/bus` – Inspect pub/sub message bus statistics & subscribers
+- `POST /api/admin/bus/publish` – Publish system broadcast event as admin
 - `GET /api/admin/repos` – List repositories accessible via upstream GitHub token
 - `GET /api/admin/repos/:owner/:repo/releases` – Explore releases, assets, and cache status
 - `GET /api/admin/asset-cache` – Inspect local disk cache statistics and files
@@ -133,6 +144,7 @@ Requires `Authorization: Bearer <ADMIN_TOKEN>`.
 3. **Subnet Enforcement**: Client keys can be restricted to specific IPv4 CIDRs (e.g. `10.0.0.0/8`, `192.168.1.0/24`), blocking stolen credentials from outside networks.
 4. **Token-Leak Prevention on Storage Redirects**: GitHub redirects downloads to Amazon S3 / Azure pre-signed URLs. Nexus intercepts redirects manually and strips credentials before following.
 5. **Content-Type Sniffing Protection**: Raw files are served with `X-Content-Type-Options: nosniff` and sanitised types to prevent browser execution.
+6. **Gateway Credential Injection**: Upstream backend microservices receive validated `X-Nexus-Client` identity headers and injected internal tokens without clients ever handling backend secrets.
 
 ---
 
@@ -142,4 +154,4 @@ Requires `Authorization: Bearer <ADMIN_TOKEN>`.
 npm test
 ```
 
-Runs the 18 automated integration tests against a mock upstream server covering auth, access control, URL rewriting, streaming pipelines, token leak protection, admin CRUD, rate limiting, disk caching, range requests, and webhooks.
+Runs the 24 automated integration tests against a mock upstream server covering auth, access control, URL rewriting, streaming pipelines, token leak protection, admin CRUD, rate limiting, disk caching, range requests, webhooks, Service Gateway proxying with credential injection, and the Real-Time Message Bus.
