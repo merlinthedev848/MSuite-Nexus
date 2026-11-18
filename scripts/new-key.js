@@ -46,7 +46,7 @@ if (fs.existsSync(file)) {
     process.exit(1);
   }
 }
-data.clients ??= [];
+data.clients = data.clients || [];
 
 if (data.clients.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
   console.error(`Client "${name}" already exists in ${file}. Remove it first to rotate its key.`);

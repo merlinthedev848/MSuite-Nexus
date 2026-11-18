@@ -37,7 +37,7 @@ if (fs.existsSync(file)) {
     data = JSON.parse(fs.readFileSync(file, 'utf8'));
   } catch {}
 }
-data.clients ??= [];
+data.clients = data.clients || [];
 
 const results = [];
 let envConfig = `# MSuite Products Unified Nexus Configuration\n# Generated: ${new Date().toISOString()}\nMSUITE_NEXUS_URL=http://localhost:8080\n\n`;
