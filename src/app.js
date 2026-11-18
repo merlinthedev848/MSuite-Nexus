@@ -3,6 +3,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { timingSafeEqual } from 'node:crypto';
 import { canAccess, isIpAllowed, isClientExpired } from './clients.js';
 import { UpstreamError } from './github.js';
 import { compareVersions } from './version.js';
@@ -50,6 +51,14 @@ export function createApp({ config, clients, github, metrics, events, assetCache
   app.set('trust proxy', config.trustProxy);
 
   const baseUrl = (req) => config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+
+  const checkAdminToken = (input) => {
+    if (!input || typeof input !== 'string') return false;
+    const expected = Buffer.from(config.adminToken, 'utf8');
+    const actual = Buffer.from(input, 'utf8');
+    if (expected.length !== actual.length) return false;
+    return timingSafeEqual(expected, actual);
+  };
 
   // Preserve raw body on webhook route for HMAC verification
   app.use('/v1/webhook', express.raw({ type: '*/*', limit: '2mb' }), (req, res, next) => {
@@ -141,6 +150,9 @@ export function createApp({ config, clients, github, metrics, events, assetCache
     ok: true,
     service: 'MSuite Nexus',
     version: '2.0.0',
+    uptimeSec: metrics ? Math.floor((Date.now() - metrics.startTime) / 1000) : 0,
+    activeClients: clients.byHash.size,
+    assetCacheEnabled: Boolean(assetCache?.enabled),
     timestamp: new Date().toISOString(),
   }));
 
@@ -162,7 +174,20 @@ export function createApp({ config, clients, github, metrics, events, assetCache
   const v1 = express.Router();
 
   v1.use((req, res, next) => {
-    const client = clients.authenticate(extractKey(req));
+    let client = null;
+
+    // Check for admin sandbox client simulation
+    const simClientName = req.get('x-nexus-simulate-client');
+    const simAdminToken = req.get('x-admin-token');
+    if (simClientName && simAdminToken && checkAdminToken(simAdminToken)) {
+      client = clients.getClient(simClientName);
+      if (!client) {
+        return next(new HttpError(404, 'client_not_found', `Simulated client "${simClientName}" not found`));
+      }
+    } else {
+      client = clients.authenticate(extractKey(req));
+    }
+
     if (!client) return next(new HttpError(401, 'unauthorized', 'Missing or invalid API key'));
 
     // Check expiration
@@ -250,7 +275,6 @@ export function createApp({ config, clients, github, metrics, events, assetCache
       return stable;
     }
 
-    // channel === 'beta' or 'canary' returns newest published release
     const newest = valid[0];
     if (!newest) throw new UpstreamError(404, 'no releases found');
     return newest;
@@ -287,8 +311,12 @@ export function createApp({ config, clients, github, metrics, events, assetCache
 
     // 1. Check if asset is cached on disk
     if (assetCache && assetCache.has(assetId)) {
-      await assetCache.serveCached(assetId, req, res);
-      return;
+      try {
+        await assetCache.serveCached(assetId, req, res);
+        return;
+      } catch (e) {
+        log(`Cached asset read failed, falling back to upstream: ${e.message}`);
+      }
     }
 
     // 2. Fetch from upstream GitHub
@@ -297,7 +325,6 @@ export function createApp({ config, clients, github, metrics, events, assetCache
       range: req.get('range'),
     });
 
-    // Extract headers
     res.status(upstream.status);
     for (const h of PASSTHROUGH_HEADERS) {
       const v = upstream.headers.get(h);
@@ -309,7 +336,6 @@ export function createApp({ config, clients, github, metrics, events, assetCache
 
     const upstreamStream = Readable.fromWeb(upstream.body);
 
-    // If cache enabled and response is full 200, tee stream to disk cache while piping to client
     if (assetCache?.enabled && upstream.status === 200) {
       const tee1 = new PassThrough();
       const tee2 = new PassThrough();
@@ -324,8 +350,7 @@ export function createApp({ config, clients, github, metrics, events, assetCache
         etag: upstream.headers.get('etag') || '',
       };
 
-      // Background cache write
-      assetCache.cacheAssetStream(assetId, tee2, meta).catch((e) => log(`Cache error: ${e.message}`));
+      assetCache.cacheAssetStream(assetId, tee2, meta).catch((e) => log(`Cache write error: ${e.message}`));
       await pipeline(tee1, res);
     } else {
       await pipeline(upstreamStream, res);

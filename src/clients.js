@@ -13,13 +13,26 @@ function ipv4ToInt(ip) {
 
 function matchCidr(ip, cidr) {
   try {
-    const cleanIp = ip.replace(/^::ffff:/, '');
-    if (cidr === '*' || cidr === cleanIp) return true;
-    if (!cidr.includes('/')) return cleanIp === cidr;
+    const cleanIp = String(ip || '').replace(/^::ffff:/, '').trim();
+    const cleanCidr = String(cidr || '').trim();
 
-    const [subnet, bitsStr] = cidr.split('/');
+    if (cleanCidr === '*' || cleanCidr === cleanIp) return true;
+
+    // Handle localhost equivalency
+    const isLocalIp = cleanIp === '127.0.0.1' || cleanIp === '::1';
+    const isLocalRule = cleanCidr === '127.0.0.1' || cleanCidr === '::1' || cleanCidr.startsWith('127.');
+    if (isLocalIp && isLocalRule) return true;
+
+    if (!cleanCidr.includes('/')) return cleanIp === cleanCidr;
+
+    // Verify IPv4 dotted format for CIDR calculation
+    const isIpv4 = /^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(cleanIp);
+    if (!isIpv4) return false;
+
+    const [subnet, bitsStr] = cleanCidr.split('/');
     const bits = parseInt(bitsStr, 10);
     if (isNaN(bits) || bits < 0 || bits > 32) return false;
+    if (!/^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$/.test(subnet)) return false;
 
     const ipInt = ipv4ToInt(cleanIp);
     const subnetInt = ipv4ToInt(subnet);
@@ -40,7 +53,8 @@ export function isIpAllowed(client, ip) {
 
 export function isClientExpired(client) {
   if (!client.expiresAt) return false;
-  return new Date(client.expiresAt).getTime() <= Date.now();
+  const exp = new Date(client.expiresAt).getTime();
+  return !isNaN(exp) && exp <= Date.now();
 }
 
 /**
@@ -62,31 +76,32 @@ export function parseClients(data) {
   const names = new Set();
 
   for (const c of list) {
-    if (!c || typeof c.name !== 'string' || !c.name) throw new Error('client entry is missing "name"');
-    if (!/^[a-f0-9]{64}$/i.test(c.keyHash || '')) throw new Error(`client "${c.name}" has an invalid keyHash`);
-    if (names.has(c.name)) throw new Error(`duplicate client name "${c.name}"`);
-    names.add(c.name);
+    if (!c || typeof c.name !== 'string' || !c.name.trim()) throw new Error('client entry is missing "name"');
+    const name = c.name.trim();
+    if (!/^[a-f0-9]{64}$/i.test(c.keyHash || '')) throw new Error(`client "${name}" has an invalid keyHash`);
+    if (names.has(name.toLowerCase())) throw new Error(`duplicate client name "${name}"`);
+    names.add(name.toLowerCase());
 
     const perms = c.permissions ?? PERMISSIONS;
     for (const p of perms) {
-      if (!PERMISSIONS.includes(p)) throw new Error(`client "${c.name}" has unknown permission "${p}"`);
+      if (!PERMISSIONS.includes(p)) throw new Error(`client "${name}" has unknown permission "${p}"`);
     }
 
     const clientObj = {
-      name: c.name,
-      repos: (c.repos || []).map((r) => String(r).toLowerCase()),
+      name,
+      repos: (c.repos || []).map((r) => String(r).trim().toLowerCase()),
       permissions: new Set(perms),
       disabled: Boolean(c.disabled),
       keyHash: c.keyHash.toLowerCase(),
       createdAt: c.createdAt || null,
-      description: c.description || '',
-      allowedIps: Array.isArray(c.allowedIps) ? c.allowedIps : ['*'],
-      expiresAt: c.expiresAt || null,
+      description: c.description ? String(c.description).trim() : '',
+      allowedIps: Array.isArray(c.allowedIps) && c.allowedIps.length ? c.allowedIps.map((s) => String(s).trim()) : ['*'],
+      expiresAt: c.expiresAt ? new Date(c.expiresAt).toISOString() : null,
     };
 
-    byName.set(c.name.toLowerCase(), clientObj);
+    byName.set(name.toLowerCase(), clientObj);
     if (!clientObj.disabled) {
-      byHash.set(c.keyHash.toLowerCase(), clientObj);
+      byHash.set(clientObj.keyHash, clientObj);
     }
   }
 
@@ -178,7 +193,8 @@ export class ClientStore {
   }
 
   getClient(name) {
-    return this.byName.get(name.toLowerCase()) || null;
+    if (!name || typeof name !== 'string') return null;
+    return this.byName.get(name.trim().toLowerCase()) || null;
   }
 
   addClient({
@@ -189,8 +205,9 @@ export class ClientStore {
     allowedIps = ['*'],
     expiresAt = null,
   }) {
-    if (!name || typeof name !== 'string') throw new Error('Client name is required');
-    if (this.byName.has(name.toLowerCase())) throw new Error(`Client "${name}" already exists`);
+    if (!name || typeof name !== 'string' || !name.trim()) throw new Error('Client name is required');
+    const trimmedName = name.trim();
+    if (this.byName.has(trimmedName.toLowerCase())) throw new Error(`Client "${trimmedName}" already exists`);
 
     for (const p of permissions) {
       if (!PERMISSIONS.includes(p)) throw new Error(`Unknown permission: ${p}`);
@@ -200,18 +217,18 @@ export class ClientStore {
     const keyHash = hashKey(key);
 
     const clientObj = {
-      name,
-      description,
-      repos: repos.map((r) => String(r).toLowerCase()),
+      name: trimmedName,
+      description: description ? String(description).trim() : '',
+      repos: repos.map((r) => String(r).trim().toLowerCase()),
       permissions: new Set(permissions),
       disabled: false,
-      allowedIps: Array.isArray(allowedIps) ? allowedIps : ['*'],
-      expiresAt: expiresAt || null,
+      allowedIps: Array.isArray(allowedIps) && allowedIps.length ? allowedIps.map((s) => String(s).trim()) : ['*'],
+      expiresAt: expiresAt ? new Date(expiresAt).toISOString() : null,
       keyHash,
       createdAt: new Date().toISOString(),
     };
 
-    this.byName.set(name.toLowerCase(), clientObj);
+    this.byName.set(trimmedName.toLowerCase(), clientObj);
     this.byHash.set(keyHash, clientObj);
     this.save();
 
@@ -223,7 +240,7 @@ export class ClientStore {
     if (!client) throw new Error(`Client "${name}" not found`);
 
     if (repos !== undefined) {
-      client.repos = repos.map((r) => String(r).toLowerCase());
+      client.repos = repos.map((r) => String(r).trim().toLowerCase());
     }
     if (permissions !== undefined) {
       for (const p of permissions) {
@@ -232,13 +249,13 @@ export class ClientStore {
       client.permissions = new Set(permissions);
     }
     if (description !== undefined) {
-      client.description = String(description);
+      client.description = String(description).trim();
     }
     if (allowedIps !== undefined) {
-      client.allowedIps = Array.isArray(allowedIps) ? allowedIps : ['*'];
+      client.allowedIps = Array.isArray(allowedIps) && allowedIps.length ? allowedIps.map((s) => String(s).trim()) : ['*'];
     }
     if (expiresAt !== undefined) {
-      client.expiresAt = expiresAt || null;
+      client.expiresAt = expiresAt ? new Date(expiresAt).toISOString() : null;
     }
     if (disabled !== undefined) {
       client.disabled = Boolean(disabled);
@@ -275,14 +292,14 @@ export class ClientStore {
     if (!client) throw new Error(`Client "${name}" not found`);
 
     this.byHash.delete(client.keyHash);
-    this.byName.delete(name.toLowerCase());
+    this.byName.delete(name.trim().toLowerCase());
     this.save();
     return true;
   }
 }
 
 export function canAccess(client, owner, repo, permission) {
-  if (!client.permissions.has(permission)) return false;
+  if (!client || !client.permissions.has(permission)) return false;
   const o = owner.toLowerCase();
   const full = `${o}/${repo.toLowerCase()}`;
   return client.repos.some((p) => p === '*' || p === full || p === `${o}/*`);

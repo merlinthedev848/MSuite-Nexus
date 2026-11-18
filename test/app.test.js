@@ -327,6 +327,7 @@ test('Admin API client CRUD with IP and expiration', async () => {
 });
 
 test('Admin API Sandbox tester (/api/admin/tester)', async () => {
+  // Test direct key test
   const res = await adminReq('/api/admin/tester', 'POST', {
     path: '/v1/me',
     method: 'GET',
@@ -337,6 +338,18 @@ test('Admin API Sandbox tester (/api/admin/tester)', async () => {
   assert.equal(data.ok, true);
   assert.equal(data.status, 200);
   assert.equal(data.body.name, 'a');
+
+  // Test client impersonation simulation by name
+  const simRes = await adminReq('/api/admin/tester', 'POST', {
+    path: '/v1/me',
+    method: 'GET',
+    clientName: 'b',
+  });
+  assert.equal(simRes.status, 200);
+  const simData = await simRes.json();
+  assert.equal(simData.ok, true);
+  assert.equal(simData.status, 200);
+  assert.equal(simData.body.name, 'b');
 });
 
 test('GitHub Webhook with HMAC signature invalidates cache', async () => {

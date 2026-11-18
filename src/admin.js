@@ -1,5 +1,6 @@
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
+import { Readable } from 'node:stream';
 
 export function createAdminRouter({ config, clients, github, metrics, events, assetCache = null, audit = null, log = console.log }) {
   const router = express.Router();
@@ -55,13 +56,18 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
 
     const timer = setInterval(() => {
       try {
-        res.write(': ping\n\n');
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(': ping\n\n');
+        } else {
+          clearInterval(timer);
+        }
       } catch {
         clearInterval(timer);
       }
     }, 15000);
 
     res.on('close', () => clearInterval(timer));
+    res.on('error', () => clearInterval(timer));
   });
 
   // Overview metrics snapshot
@@ -100,9 +106,9 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
     const { name, repos, permissions, description, allowedIps, expiresAt } = req.body || {};
     try {
       const result = clients.addClient({ name, repos, permissions, description, allowedIps, expiresAt });
-      events.broadcast('client_change', { action: 'add', name });
-      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_CREATED', target: name, details: { repos, permissions } });
-      log(`Admin added client "${name}"`);
+      events.broadcast('client_change', { action: 'add', name: result.client.name });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_CREATED', target: result.client.name, details: { repos, permissions } });
+      log(`Admin added client "${result.client.name}"`);
       res.status(201).json({
         ok: true,
         client: {
@@ -212,7 +218,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
         etag: upstream.headers.get('etag') || '',
       };
 
-      // Asynchronously stream to disk
+      // Stream to disk
       assetCache.cacheAssetStream(assetId, stream, meta).then(() => {
         events.broadcast('asset_cached', { assetId, name: meta.name });
       });
@@ -291,18 +297,25 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
 
   // Interactive API Sandbox Tester
   router.post('/tester', async (req, res) => {
-    const { path: reqPath, method = 'GET', clientKey } = req.body || {};
+    const { path: reqPath, method = 'GET', clientKey, clientName } = req.body || {};
     if (!reqPath || !reqPath.startsWith('/v1/')) {
       return res.status(400).json({ error: 'bad_request', message: 'Path must begin with /v1/' });
     }
 
     const start = Date.now();
-    const port = config.port;
-    const url = `http://127.0.0.1:${port}${reqPath}`;
+    const host = req.get('host');
+    const url = `${req.protocol}://${host}${reqPath}`;
 
     try {
       const headers = {};
-      if (clientKey) headers['Authorization'] = `Bearer ${clientKey}`;
+
+      if (clientKey) {
+        headers['Authorization'] = `Bearer ${clientKey}`;
+      } else if (clientName) {
+        // Authenticated admin can simulate any configured client directly
+        headers['X-Nexus-Simulate-Client'] = clientName;
+        headers['X-Admin-Token'] = config.adminToken;
+      }
 
       const upstreamRes = await fetch(url, { method, headers });
       const latencyMs = Date.now() - start;
@@ -314,7 +327,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
         responseBody = await upstreamRes.json();
       } else {
         const text = await upstreamRes.text();
-        responseBody = text.length > 1000 ? text.slice(0, 1000) + '... (truncated)' : text;
+        responseBody = text.length > 2000 ? text.slice(0, 2000) + '... (truncated)' : text;
       }
 
       const resHeaders = {};

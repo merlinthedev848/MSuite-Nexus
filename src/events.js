@@ -8,9 +8,12 @@ export class EventBroker extends EventEmitter {
 
   addClient(res) {
     this.clients.add(res);
-    res.on('close', () => {
+    const cleanup = () => {
       this.clients.delete(res);
-    });
+    };
+    res.on('close', cleanup);
+    res.on('finish', cleanup);
+    res.on('error', cleanup);
   }
 
   broadcast(eventType, data) {
@@ -18,7 +21,11 @@ export class EventBroker extends EventEmitter {
     const payload = `event: ${eventType}\ndata: ${JSON.stringify(data)}\n\n`;
     for (const res of this.clients) {
       try {
-        res.write(payload);
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(payload);
+        } else {
+          this.clients.delete(res);
+        }
       } catch {
         this.clients.delete(res);
       }

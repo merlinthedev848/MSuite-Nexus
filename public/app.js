@@ -1,4 +1,4 @@
-// State management
+// MSuite Nexus - Frontend Application Architecture
 const state = {
   adminToken: localStorage.getItem('msuite_admin_token') || '',
   activeTab: 'overview',
@@ -19,6 +19,17 @@ const state = {
 
 // Utilities
 const el = (id) => document.getElementById(id);
+
+function escapeHtml(str) {
+  if (str === null || str === undefined) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 const formatBytes = (bytes) => {
   if (!bytes || bytes === 0) return '0 B';
   const k = 1024;
@@ -44,6 +55,16 @@ function toast(msg, type = 'info') {
   div.textContent = msg;
   container.appendChild(div);
   setTimeout(() => div.remove(), 4000);
+}
+
+function flashCopyButton(btn) {
+  const original = btn.textContent;
+  btn.textContent = '✓ Copied!';
+  btn.classList.add('btn-primary');
+  setTimeout(() => {
+    btn.textContent = original;
+    btn.classList.remove('btn-primary');
+  }, 1500);
 }
 
 // API Helper
@@ -72,6 +93,7 @@ async function api(path, options = {}) {
 // Admin Auth Modal
 function showAdminLoginModal() {
   el('modalAdminLogin').classList.remove('hidden');
+  el('inputAdminToken').focus();
 }
 
 function hideAdminLoginModal() {
@@ -133,6 +155,7 @@ function loadActiveTabData() {
       populateSandboxClientSelect();
       break;
     case 'live-logs':
+      renderLogsTable();
       break;
     case 'audit':
       loadAuditLogs();
@@ -197,7 +220,7 @@ async function loadOverview() {
     } else {
       tbody.innerHTML = data.clients.map((c) => `
         <tr>
-          <td><strong>${c.name}</strong></td>
+          <td><strong>${escapeHtml(c.name)}</strong></td>
           <td>${c.requests.toLocaleString()}</td>
           <td>${formatBytes(c.bytes)}</td>
           <td>${c.lastSeen ? new Date(c.lastSeen).toLocaleTimeString() : 'Never'}</td>
@@ -220,6 +243,7 @@ function renderThroughputSparkline(data) {
 
   const w = canvas.clientWidth;
   const h = canvas.clientHeight;
+  if (!w || !h) return;
   canvas.width = w * dpr;
   canvas.height = h * dpr;
   ctx.scale(dpr, dpr);
@@ -237,7 +261,7 @@ function renderThroughputSparkline(data) {
   const plotH = h - paddingY * 2;
   const stepX = plotW / (values.length - 1);
 
-  // Draw area gradient
+  // Gradient area
   ctx.beginPath();
   values.forEach((v, idx) => {
     const x = paddingX + idx * stepX;
@@ -255,7 +279,7 @@ function renderThroughputSparkline(data) {
   ctx.fillStyle = grad;
   ctx.fill();
 
-  // Draw line
+  // Line
   ctx.beginPath();
   values.forEach((v, idx) => {
     const x = paddingX + idx * stepX;
@@ -267,7 +291,7 @@ function renderThroughputSparkline(data) {
   ctx.lineWidth = 2.5;
   ctx.stroke();
 
-  // Draw data point circles
+  // Dots
   values.forEach((v, idx) => {
     const x = paddingX + idx * stepX;
     const y = h - paddingY - (v / maxVal) * plotH;
@@ -319,20 +343,20 @@ function renderClientsTable(list) {
     return `
       <tr>
         <td>${statusBadge}</td>
-        <td><strong>${c.name}</strong></td>
-        <td class="text-secondary text-xs">${c.description || '—'}</td>
-        <td>${c.repos.map((r) => `<span class="badge badge-outline text-xs">${r}</span>`).join(' ')}</td>
-        <td>${c.permissions.map((p) => `<span class="badge text-xs">${p}</span>`).join(' ')}</td>
-        <td><code>${ipsStr}</code></td>
+        <td><strong>${escapeHtml(c.name)}</strong></td>
+        <td class="text-secondary text-xs">${escapeHtml(c.description || '—')}</td>
+        <td>${c.repos.map((r) => `<span class="badge badge-outline text-xs">${escapeHtml(r)}</span>`).join(' ')}</td>
+        <td>${c.permissions.map((p) => `<span class="badge text-xs">${escapeHtml(p)}</span>`).join(' ')}</td>
+        <td><code>${escapeHtml(ipsStr)}</code></td>
         <td class="text-xs text-muted">${expStr}</td>
         <td>${(c.requests || 0).toLocaleString()}</td>
         <td class="text-muted text-xs">${c.lastSeen ? new Date(c.lastSeen).toLocaleTimeString() : 'Never'}</td>
         <td class="text-right">
-          <button class="btn-sm btn-outline btn-rotate" data-name="${c.name}">Rotate</button>
-          <button class="btn-sm ${c.disabled ? 'btn-outline' : 'btn-ghost'} btn-toggle" data-name="${c.name}" data-disabled="${c.disabled}">
+          <button class="btn-sm btn-outline btn-rotate" data-name="${escapeHtml(c.name)}">Rotate</button>
+          <button class="btn-sm ${c.disabled ? 'btn-outline' : 'btn-ghost'} btn-toggle" data-name="${escapeHtml(c.name)}" data-disabled="${c.disabled}">
             ${c.disabled ? 'Enable' : 'Disable'}
           </button>
-          <button class="btn-sm btn-danger btn-delete" data-name="${c.name}">Delete</button>
+          <button class="btn-sm btn-danger btn-delete" data-name="${escapeHtml(c.name)}">Delete</button>
         </td>
       </tr>
     `;
@@ -399,7 +423,7 @@ async function loadRepos() {
     state.repos = list;
     renderRepoList(list);
   } catch (e) {
-    container.innerHTML = `<div class="text-center text-danger p-4">Failed: ${e.message}</div>`;
+    container.innerHTML = `<div class="text-center text-danger p-4">Failed: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -414,9 +438,9 @@ function renderRepoList(list) {
   }
 
   container.innerHTML = filtered.map((r) => `
-    <div class="repo-item ${state.selectedRepo?.full_name === r.full_name ? 'selected' : ''}" data-repo="${r.full_name}">
-      <div class="repo-name">${r.full_name}</div>
-      <div class="repo-desc">${r.description || 'No description'}</div>
+    <div class="repo-item ${state.selectedRepo?.full_name === r.full_name ? 'selected' : ''}" data-repo="${escapeHtml(r.full_name)}">
+      <div class="repo-name">${escapeHtml(r.full_name)}</div>
+      <div class="repo-desc">${escapeHtml(r.description || 'No description')}</div>
     </div>
   `).join('');
 
@@ -452,7 +476,7 @@ async function loadReleases(fullName) {
     state.releases = list;
     renderReleases(list);
   } catch (e) {
-    container.innerHTML = `<div class="text-center text-danger p-4">Failed: ${e.message}</div>`;
+    container.innerHTML = `<div class="text-center text-danger p-4">Failed: ${escapeHtml(e.message)}</div>`;
   }
 }
 
@@ -473,14 +497,14 @@ function renderReleases(list) {
   container.innerHTML = filtered.map((rel) => `
     <div class="release-card">
       <div class="release-title-row">
-        <span class="release-tag">${rel.tag_name}</span>
-        <strong>${rel.name || rel.tag_name}</strong>
+        <span class="release-tag">${escapeHtml(rel.tag_name)}</span>
+        <strong>${escapeHtml(rel.name || rel.tag_name)}</strong>
         ${rel.prerelease ? '<span class="badge badge-warning">Pre-release</span>' : '<span class="badge badge-success">Stable</span>'}
         <span class="text-muted text-xs" style="margin-left: auto;">
           Published: ${new Date(rel.published_at).toLocaleDateString()}
         </span>
       </div>
-      ${rel.body ? `<p class="text-secondary text-sm">${rel.body.slice(0, 300)}</p>` : ''}
+      ${rel.body ? `<p class="text-secondary text-sm">${escapeHtml(rel.body.slice(0, 300))}</p>` : ''}
 
       ${rel.assets && rel.assets.length ? `
         <table class="asset-table">
@@ -495,7 +519,7 @@ function renderReleases(list) {
           <tbody>
             ${rel.assets.map((a) => `
               <tr>
-                <td><code>${a.name}</code></td>
+                <td><code>${escapeHtml(a.name)}</code></td>
                 <td class="text-muted">${formatBytes(a.size)}</td>
                 <td>
                   ${a.cachedLocally
@@ -504,7 +528,7 @@ function renderReleases(list) {
                 </td>
                 <td class="text-right">
                   ${!a.cachedLocally ? `
-                    <button class="btn-sm btn-outline btn-prewarm" data-id="${a.id}" data-name="${a.name}">Pre-warm to Disk</button>
+                    <button class="btn-sm btn-outline btn-prewarm" data-id="${a.id}" data-name="${escapeHtml(a.name)}">Pre-warm to Disk</button>
                   ` : ''}
                   <a href="${a.download_url}" target="_blank" class="btn-sm btn-outline">Direct URL</a>
                 </td>
@@ -538,30 +562,33 @@ function renderReleases(list) {
 
 function populateSnippetClientSelect(clients) {
   const sel = el('snippetClientSelect');
+  const currentVal = sel.value;
   sel.innerHTML = '<option value="">&lt;YOUR_API_KEY&gt;</option>' +
-    clients.map((c) => `<option value="${c.name}">${c.name} (${c.keyMasked})</option>`).join('');
+    clients.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)} (${c.keyMasked})</option>`).join('');
+  if (currentVal) sel.value = currentVal;
 }
 
 function updateSnippet() {
   if (!state.selectedRepo) return;
   const repo = state.selectedRepo.full_name;
   const host = state.overviewData?.publicBaseUrl || window.location.origin;
-  const key = '<YOUR_API_KEY>';
+  const selectedClient = el('snippetClientSelect')?.value;
+  const key = selectedClient ? `process.env.${selectedClient.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY` : '<YOUR_API_KEY>';
   const lang = state.snippetLang;
 
   let code = '';
   switch (lang) {
     case 'curl':
-      code = `# Check for stable updates\ncurl -H "Authorization: Bearer ${key}" \\\n  "${host}/v1/repos/${repo}/update?current=1.0.0&channel=stable"\n\n# Download latest release asset (with resume/range support)\ncurl -H "Authorization: Bearer ${key}" \\\n  -C - -OJ "${host}/v1/repos/${repo}/releases/assets/<ASSET_ID>"`;
+      code = `# Check for stable updates\ncurl -H "Authorization: Bearer ${selectedClient ? `$${selectedClient.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY` : '<YOUR_API_KEY>'}" \\\n  "${host}/v1/repos/${repo}/update?current=1.0.0&channel=stable"\n\n# Download latest release asset (with resume/range support)\ncurl -H "Authorization: Bearer ${selectedClient ? `$${selectedClient.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY` : '<YOUR_API_KEY>'}" \\\n  -C - -OJ "${host}/v1/repos/${repo}/releases/assets/<ASSET_ID>"`;
       break;
     case 'ps':
-      code = `# Check for updates\n$headers = @{ "Authorization" = "Bearer ${key}" }\n$update = Invoke-RestMethod -Uri "${host}/v1/repos/${repo}/update?current=1.0.0" -Headers $headers\n\nif ($update.update_available) {\n    $asset = $update.release.assets[0]\n    Invoke-WebRequest -Uri $asset.download_url -Headers $headers -OutFile $asset.name\n}`;
+      code = `# Check for updates\n$key = ${selectedClient ? `$env:${selectedClient.toUpperCase().replace(/[^A-Z0-9]/g, '_')}_KEY` : '"<YOUR_API_KEY>"'}\n$headers = @{ "Authorization" = "Bearer $key" }\n$update = Invoke-RestMethod -Uri "${host}/v1/repos/${repo}/update?current=1.0.0" -Headers $headers\n\nif ($update.update_available) {\n    $asset = $update.release.assets[0]\n    Invoke-WebRequest -Uri $asset.download_url -Headers $headers -OutFile $asset.name\n}`;
       break;
     case 'node':
-      code = `// Fetch latest release and assets\nconst res = await fetch('${host}/v1/repos/${repo}/releases/latest', {\n  headers: { 'Authorization': 'Bearer ${key}' }\n});\nconst release = await res.json();\nconsole.log('Latest tag:', release.tag_name);\nconsole.log('Assets:', release.assets);`;
+      code = `// Fetch latest release and assets\nconst key = ${key};\nconst res = await fetch('${host}/v1/repos/${repo}/releases/latest', {\n  headers: { 'Authorization': \`Bearer \${key}\` }\n});\nconst release = await res.json();\nconsole.log('Latest tag:', release.tag_name);\nconsole.log('Assets:', release.assets);`;
       break;
     case 'python':
-      code = `import requests\n\nheaders = {"Authorization": "Bearer ${key}"}\nr = requests.get("${host}/v1/repos/${repo}/update?current=1.0.0", headers=headers)\ndata = r.json()\n\nif data.get("update_available"):\n    print(f"New version available: {data['latest_version']}")\n    asset_url = data["release"]["assets"][0]["download_url"]\n    with requests.get(asset_url, headers=headers, stream=True) as resp:\n        with open("update.bin", "wb") as f:\n            for chunk in resp.iter_content(chunk_size=8192):\n                f.write(chunk)`;
+      code = `import os, requests\n\nkey = os.getenv("${selectedClient ? selectedClient.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY' : 'NEXUS_API_KEY'}", "<YOUR_API_KEY>")\nheaders = {"Authorization": f"Bearer {key}"}\nr = requests.get("${host}/v1/repos/${repo}/update?current=1.0.0", headers=headers)\ndata = r.json()\n\nif data.get("update_available"):\n    print(f"New version available: {data['latest_version']}")\n    asset_url = data["release"]["assets"][0]["download_url"]\n    with requests.get(asset_url, headers=headers, stream=True) as resp:\n        with open("update.bin", "wb") as f:\n            for chunk in resp.iter_content(chunk_size=8192):\n                f.write(chunk)`;
       break;
   }
   el('snippetCode').textContent = code;
@@ -570,14 +597,18 @@ function updateSnippet() {
 // 4. API SANDBOX
 function populateSandboxClientSelect() {
   const sel = el('sandboxClientSelect');
+  const cur = sel.value;
   sel.innerHTML = '<option value="">(No API Key - Anonymous)</option>' +
-    state.clients.map((c) => `<option value="${c.name}">${c.name}</option>`).join('');
+    state.clients.map((c) => `<option value="${escapeHtml(c.name)}">${escapeHtml(c.name)}</option>`).join('');
+  if (cur) sel.value = cur;
 }
 
 async function executeSandboxRequest() {
   const path = el('sandboxPathInput').value.trim();
   const method = el('sandboxMethod').value;
   const clientName = el('sandboxClientSelect').value;
+
+  if (!path) return toast('Request path cannot be empty', 'warning');
 
   const card = el('sandboxResultCard');
   card.classList.remove('hidden');
@@ -586,7 +617,7 @@ async function executeSandboxRequest() {
   try {
     const res = await api('/api/admin/tester', {
       method: 'POST',
-      body: { path, method, clientKey: clientName ? 'simulated' : null },
+      body: { path, method, clientName: clientName || null },
     });
 
     const statusTag = el('sandboxStatusTag');
@@ -602,38 +633,58 @@ async function executeSandboxRequest() {
   }
 }
 
-// 5. LIVE LOGS (SSE)
+// 5. LIVE LOGS (SSE & REAL-TIME FILTERING)
 function handleIncomingLog(log) {
   state.logCounter++;
   el('logCounter').textContent = state.logCounter;
 
+  state.logs.unshift(log);
+  if (state.logs.length > 200) state.logs.pop();
+
+  if (state.activeTab === 'live-logs') {
+    renderLogsTable();
+  }
+}
+
+function renderLogsTable() {
   if (state.isLogPaused) return;
 
   const tbody = el('terminalTableBody');
-  const emptyRow = tbody.querySelector('.log-empty-row');
-  if (emptyRow) emptyRow.remove();
+  const filter = (el('logFilterInput').value || '').toLowerCase().trim();
 
-  const tr = document.createElement('tr');
-  const statusCategory = log.status >= 500 ? '5xx' : log.status >= 400 ? '4xx' : log.status >= 300 ? '3xx' : '2xx';
+  const filtered = state.logs.filter((log) => {
+    if (!filter) return true;
+    return (
+      (log.path && log.path.toLowerCase().includes(filter)) ||
+      (log.client && log.client.toLowerCase().includes(filter)) ||
+      (log.method && log.method.toLowerCase().includes(filter)) ||
+      (log.ip && log.ip.toLowerCase().includes(filter)) ||
+      String(log.status).includes(filter)
+    );
+  });
 
-  tr.innerHTML = `
-    <td class="text-muted text-xs">${new Date(log.time).toLocaleTimeString()}</td>
-    <td><span class="status-tag tag-${statusCategory}">${log.status}</span></td>
-    <td><span class="method ${log.method.toLowerCase()}">${log.method}</span></td>
-    <td><code>${log.path}</code></td>
-    <td><strong>${log.client || 'anonymous'}</strong></td>
-    <td class="text-muted">${log.ip || '—'}</td>
-    <td>${log.ms} ms</td>
-    <td class="text-muted">${formatBytes(log.bytes)}</td>
-  `;
-
-  tbody.insertBefore(tr, tbody.firstChild);
-
-  while (tbody.children.length > 200) {
-    tbody.lastChild.remove();
+  if (!filtered.length) {
+    tbody.innerHTML = '<tr class="log-empty-row"><td colspan="8" class="text-center text-muted">Awaiting matching proxy requests...</td></tr>';
+    return;
   }
 
-  if (state.autoScrollLogs) {
+  tbody.innerHTML = filtered.map((log) => {
+    const statusCategory = log.status >= 500 ? '5xx' : log.status >= 400 ? '4xx' : log.status >= 300 ? '3xx' : '2xx';
+    return `
+      <tr>
+        <td class="text-muted text-xs">${new Date(log.time).toLocaleTimeString()}</td>
+        <td><span class="status-tag tag-${statusCategory}">${log.status}</span></td>
+        <td><span class="method ${log.method.toLowerCase()}">${escapeHtml(log.method)}</span></td>
+        <td><code>${escapeHtml(log.path)}</code></td>
+        <td><strong>${escapeHtml(log.client || 'anonymous')}</strong></td>
+        <td class="text-muted">${escapeHtml(log.ip || '—')}</td>
+        <td>${log.ms} ms</td>
+        <td class="text-muted">${formatBytes(log.bytes)}</td>
+      </tr>
+    `;
+  }).join('');
+
+  if (state.autoScrollLogs && el('terminalContainer')) {
     el('terminalContainer').scrollTop = 0;
   }
 }
@@ -709,15 +760,15 @@ async function loadAuditLogs() {
     tbody.innerHTML = list.map((a) => `
       <tr>
         <td class="text-muted text-xs">${new Date(a.timestamp).toLocaleString()}</td>
-        <td><strong>${a.actor}</strong></td>
-        <td><span class="badge badge-outline">${a.action}</span></td>
-        <td><code>${a.target || '—'}</code></td>
-        <td class="text-muted text-xs">${a.ip}</td>
-        <td class="text-secondary text-xs">${JSON.stringify(a.details || {})}</td>
+        <td><strong>${escapeHtml(a.actor)}</strong></td>
+        <td><span class="badge badge-outline">${escapeHtml(a.action)}</span></td>
+        <td><code>${escapeHtml(a.target || '—')}</code></td>
+        <td class="text-muted text-xs">${escapeHtml(a.ip)}</td>
+        <td class="text-secondary text-xs">${escapeHtml(JSON.stringify(a.details || {}))}</td>
       </tr>
     `).join('');
   } catch (e) {
-    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${e.message}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${escapeHtml(e.message)}</td></tr>`;
   }
 }
 
@@ -727,10 +778,10 @@ async function runDiagnostics() {
   container.innerHTML = '<span class="text-muted">Running diagnostic probe to GitHub upstream...</span>';
   try {
     const diag = await api('/api/admin/diagnostics');
-    container.innerHTML = `<pre>${JSON.stringify(diag, null, 2)}</pre>`;
+    container.innerHTML = `<pre>${escapeHtml(JSON.stringify(diag, null, 2))}</pre>`;
     toast(`Diagnostics completed: ${diag.ok ? 'Healthy' : 'Degraded'} (${diag.latencyMs}ms)`, diag.ok ? 'success' : 'warning');
   } catch (e) {
-    container.innerHTML = `<span class="text-danger">Failed: ${e.message}</span>`;
+    container.innerHTML = `<span class="text-danger">Failed: ${escapeHtml(e.message)}</span>`;
   }
 }
 
@@ -744,7 +795,7 @@ async function loadCacheStats() {
     } else {
       listEl.innerHTML = stats.entries.map((e) => `
         <div class="p-2 border-b text-xs flex justify-between" style="border-bottom: 1px solid #1a253a;">
-          <code>${e.path}</code>
+          <code>${escapeHtml(e.path)}</code>
           <span class="text-muted">expires: ${new Date(e.expires).toLocaleTimeString()}</span>
         </div>
       `).join('');
@@ -768,14 +819,14 @@ async function loadAssetCacheStats() {
 
     tbody.innerHTML = data.items.map((item) => `
       <tr>
-        <td><code>${item.assetId}</code></td>
-        <td><strong>${item.name}</strong></td>
+        <td><code>${escapeHtml(item.assetId)}</code></td>
+        <td><strong>${escapeHtml(item.name)}</strong></td>
         <td>${formatBytes(item.size)}</td>
         <td>${(item.hitCount || 0).toLocaleString()}</td>
         <td class="text-muted text-xs">${new Date(item.cachedAt).toLocaleDateString()}</td>
         <td class="text-muted text-xs">${item.lastAccessed ? new Date(item.lastAccessed).toLocaleTimeString() : '—'}</td>
         <td class="text-right">
-          <button class="btn-sm btn-danger btn-purge-asset" data-id="${item.assetId}">Purge</button>
+          <button class="btn-sm btn-danger btn-purge-asset" data-id="${escapeHtml(item.assetId)}">Purge</button>
         </td>
       </tr>
     `).join('');
@@ -783,7 +834,7 @@ async function loadAssetCacheStats() {
     tbody.querySelectorAll('.btn-purge-asset').forEach((btn) => {
       btn.onclick = async () => {
         try {
-          await api(`/api/admin/asset-cache/${btn.dataset.id}`, { method: 'DELETE' });
+          await api(`/api/admin/asset-cache/${encodeURIComponent(btn.dataset.id)}`, { method: 'DELETE' });
           toast(`Asset ${btn.dataset.id} purged from disk`, 'success');
           loadAssetCacheStats();
           loadOverview();
@@ -813,12 +864,25 @@ async function purgeCache(pattern = null) {
 
 // Event Listeners setup
 function setupEventListeners() {
+  // Login
   el('btnLoginSubmit').onclick = handleLogin;
+  el('btnCloseLoginModal').onclick = hideAdminLoginModal;
+  el('btnCancelLogin').onclick = hideAdminLoginModal;
   el('inputAdminToken').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleLogin();
+    if (e.key === 'Escape') hideAdminLoginModal();
   });
   el('btnSwitchToken').onclick = () => showAdminLoginModal();
   el('btnRefreshOverview').onclick = loadOverview;
+
+  // Global escape key to close modals
+  document.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') {
+      el('modalAddClient').classList.add('hidden');
+      el('modalKeyDisplay').classList.add('hidden');
+      if (state.adminToken) hideAdminLoginModal();
+    }
+  });
 
   // Clients
   el('btnOpenAddClientModal').onclick = () => {
@@ -828,6 +892,7 @@ function setupEventListeners() {
     el('newClientIps').value = '*';
     el('newClientExpires').value = '90d';
     el('modalAddClient').classList.remove('hidden');
+    el('newClientName').focus();
   };
   el('btnCloseAddClientModal').onclick = () => el('modalAddClient').classList.add('hidden');
   el('btnCancelAddClient').onclick = () => el('modalAddClient').classList.add('hidden');
@@ -867,6 +932,7 @@ function setupEventListeners() {
 
   el('btnCopyKey').onclick = () => {
     navigator.clipboard.writeText(el('keyDisplayValue').textContent);
+    flashCopyButton(el('btnCopyKey'));
     toast('API key copied to clipboard!', 'success');
   };
   el('btnCloseKeyModal').onclick = () => el('modalKeyDisplay').classList.add('hidden');
@@ -879,6 +945,10 @@ function setupEventListeners() {
   el('repoSearchInput').oninput = () => renderRepoList(state.repos);
   el('btnRefreshReleases').onclick = () => {
     if (state.selectedRepo) loadReleases(state.selectedRepo.full_name);
+  };
+
+  el('snippetClientSelect').onchange = () => {
+    updateSnippet();
   };
 
   document.querySelectorAll('.channel-filter-btn').forEach((btn) => {
@@ -901,6 +971,7 @@ function setupEventListeners() {
 
   el('btnCopySnippet').onclick = () => {
     navigator.clipboard.writeText(el('snippetCode').textContent);
+    flashCopyButton(el('btnCopySnippet'));
     toast('Snippet copied to clipboard!', 'success');
   };
 
@@ -908,24 +979,40 @@ function setupEventListeners() {
   el('sandboxPresetSelect').onchange = (e) => {
     const val = e.target.value;
     const repo = state.selectedRepo?.full_name || 'merlinthedev848/MSuite-SIP';
-    if (val === 'me') el('sandboxPathInput').value = '/v1/me';
-    else if (val === 'update') el('sandboxPathInput').value = `/v1/repos/${repo}/update?current=1.0.0`;
-    else if (val === 'latest') el('sandboxPathInput').value = `/v1/repos/${repo}/releases/latest`;
+    if (val === 'me') {
+      el('sandboxPathInput').value = '/v1/me';
+      el('sandboxMethod').value = 'GET';
+    } else if (val === 'update') {
+      el('sandboxPathInput').value = `/v1/repos/${repo}/update?current=1.0.0`;
+      el('sandboxMethod').value = 'GET';
+    } else if (val === 'latest') {
+      el('sandboxPathInput').value = `/v1/repos/${repo}/releases/latest`;
+      el('sandboxMethod').value = 'GET';
+    }
   };
+
+  el('sandboxPathInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') executeSandboxRequest();
+  });
   el('btnExecuteSandbox').onclick = executeSandboxRequest;
 
   // Live logs
   el('btnToggleLogPause').onclick = () => {
     state.isLogPaused = !state.isLogPaused;
     el('btnToggleLogPause').textContent = state.isLogPaused ? '▶️ Resume Stream' : '⏸️ Pause Stream';
+    if (!state.isLogPaused) renderLogsTable();
   };
   el('btnClearLogs').onclick = () => {
-    el('terminalTableBody').innerHTML = '<tr class="log-empty-row"><td colspan="8" class="text-center text-muted">Awaiting incoming proxy requests...</td></tr>';
+    state.logs = [];
     state.logCounter = 0;
     el('logCounter').textContent = '0';
+    renderLogsTable();
   };
   el('chkAutoScroll').onchange = (e) => {
     state.autoScrollLogs = e.target.checked;
+  };
+  el('logFilterInput').oninput = () => {
+    renderLogsTable();
   };
 
   // Audit
@@ -934,12 +1021,19 @@ function setupEventListeners() {
   // Diagnostics
   el('btnRunDiagnostics').onclick = runDiagnostics;
   el('btnPurgeAllCache').onclick = () => purgeCache();
+  el('cachePurgePatternInput').addEventListener('keydown', (e) => {
+    if (e.key === 'Enter') {
+      const pattern = el('cachePurgePatternInput').value.trim();
+      if (pattern) purgeCache(pattern);
+    }
+  });
   el('btnPurgePattern').onclick = () => {
     const pattern = el('cachePurgePatternInput').value.trim();
     if (pattern) purgeCache(pattern);
   };
   el('btnCopyWebhookUrl').onclick = () => {
     navigator.clipboard.writeText(el('webhookUrlInput').value);
+    flashCopyButton(el('btnCopyWebhookUrl'));
     toast('Webhook URL copied!', 'success');
   };
 }

@@ -9,6 +9,15 @@ import { createApp } from './app.js';
 
 const log = (msg) => console.log(msg);
 
+process.on('unhandledRejection', (reason) => {
+  console.error('Unhandled Promise Rejection:', reason);
+});
+
+process.on('uncaughtException', (err) => {
+  console.error('Uncaught Exception:', err);
+  process.exit(1);
+});
+
 let config;
 try {
   config = loadConfig();
@@ -69,6 +78,11 @@ const server = app.listen(config.port, config.host, () => {
     log(`         Set ADMIN_TOKEN in .env to persist your credentials.`);
   }
   log(`====================================================`);
+});
+
+server.on('error', (err) => {
+  console.error(`Fatal Server Error: ${err.message}`);
+  process.exit(1);
 });
 
 const shutdown = (sig) => {

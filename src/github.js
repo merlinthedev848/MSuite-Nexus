@@ -53,6 +53,7 @@ export class GitHub {
   }
 
   updateRateLimits(token, headers) {
+    if (!headers) return;
     const limit = headers.get('x-ratelimit-limit');
     const remaining = headers.get('x-ratelimit-remaining');
     const reset = headers.get('x-ratelimit-reset');
@@ -99,9 +100,10 @@ export class GitHub {
       this.cache.clear();
       return count;
     }
+    const target = pattern.toLowerCase();
     let count = 0;
     for (const key of this.cache.keys()) {
-      if (key.includes(pattern)) {
+      if (key.toLowerCase().includes(target)) {
         this.cache.delete(key);
         count++;
       }
@@ -138,8 +140,8 @@ export class GitHub {
     let res = await this.fetch(this.apiUrl + path, { headers });
     this.updateRateLimits(token, res.headers);
 
-    // If rate-limited and we have alternative tokens in the pool, try next token
-    if (res.status === 403 && this.tokens.length > 1) {
+    // If rate-limited or forbidden and we have alternative tokens in the pool, try next token
+    if ((res.status === 403 || res.status === 429) && this.tokens.length > 1) {
       this.rotateToken();
       const nextToken = this.activeToken;
       const nextHeaders = this.authHeaders(nextToken, { Accept: 'application/vnd.github+json' });
@@ -182,7 +184,7 @@ export class GitHub {
     });
     this.updateRateLimits(token, res.headers);
 
-    if (res.status === 403 && this.tokens.length > 1) {
+    if ((res.status === 403 || res.status === 429) && this.tokens.length > 1) {
       this.rotateToken();
       token = this.activeToken;
       res = await this.fetch(url, {

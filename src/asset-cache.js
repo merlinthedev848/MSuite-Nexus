@@ -35,7 +35,7 @@ export class AssetCache {
   }
 
   has(assetId) {
-    if (!this.enabled) return false;
+    if (!this.enabled || !assetId) return false;
     const file = this.getFilePath(assetId);
     const meta = this.getMetaPath(assetId);
     return fs.existsSync(file) && fs.existsSync(meta);
@@ -51,7 +51,7 @@ export class AssetCache {
   }
 
   saveMeta(assetId, meta) {
-    if (!this.enabled) return;
+    if (!this.enabled || !assetId) return;
     try {
       fs.writeFileSync(this.getMetaPath(assetId), JSON.stringify(meta, null, 2));
     } catch (e) {
@@ -64,6 +64,10 @@ export class AssetCache {
    */
   async serveCached(assetId, req, res) {
     const filePath = this.getFilePath(assetId);
+    if (!fs.existsSync(filePath)) {
+      throw new Error('Cached asset file missing on disk');
+    }
+
     const meta = this.getMeta(assetId) || {};
     const stat = fs.statSync(filePath);
     const fileSize = stat.size;
@@ -90,7 +94,7 @@ export class AssetCache {
       const start = parseInt(parts[0], 10);
       const end = parts[1] ? parseInt(parts[1], 10) : fileSize - 1;
 
-      if (start >= fileSize || end >= fileSize || start > end) {
+      if (start >= fileSize || end >= fileSize || start > end || isNaN(start)) {
         res.status(416).set('Content-Range', `bytes */${fileSize}`).end();
         return;
       }
@@ -116,7 +120,7 @@ export class AssetCache {
    * Save an asset stream to local cache in the background
    */
   async cacheAssetStream(assetId, stream, meta) {
-    if (!this.enabled) return;
+    if (!this.enabled || !assetId) return;
     const tempPath = path.join(this.cacheDir, `asset_${assetId}.tmp.${Date.now()}`);
     const destPath = this.getFilePath(assetId);
 
@@ -145,11 +149,16 @@ export class AssetCache {
   }
 
   delete(assetId) {
+    if (!assetId) return false;
     const f = this.getFilePath(assetId);
     const m = this.getMetaPath(assetId);
     let deleted = false;
-    if (fs.existsSync(f)) { fs.unlinkSync(f); deleted = true; }
-    if (fs.existsSync(m)) { fs.unlinkSync(m); }
+    if (fs.existsSync(f)) {
+      try { fs.unlinkSync(f); deleted = true; } catch {}
+    }
+    if (fs.existsSync(m)) {
+      try { fs.unlinkSync(m); } catch {}
+    }
     return deleted;
   }
 
@@ -167,7 +176,7 @@ export class AssetCache {
   }
 
   pruneIfNeeded() {
-    if (!this.enabled) return;
+    if (!this.enabled || !fs.existsSync(this.cacheDir)) return;
     try {
       const files = fs.readdirSync(this.cacheDir).filter((f) => f.endsWith('.meta.json'));
       let totalSize = 0;
@@ -176,8 +185,10 @@ export class AssetCache {
       for (const m of files) {
         try {
           const content = JSON.parse(fs.readFileSync(path.join(this.cacheDir, m), 'utf8'));
-          totalSize += content.size || 0;
-          metas.push(content);
+          if (content && content.size) {
+            totalSize += content.size;
+            metas.push(content);
+          }
         } catch {}
       }
 
@@ -186,9 +197,11 @@ export class AssetCache {
         metas.sort((a, b) => new Date(a.lastAccessed || 0) - new Date(b.lastAccessed || 0));
         while (totalSize > this.maxBytes && metas.length > 0) {
           const victim = metas.shift();
-          this.delete(victim.assetId);
-          totalSize -= victim.size || 0;
-          this.log(`LRU evicted asset ${victim.assetId} (${victim.name})`);
+          if (victim && victim.assetId) {
+            this.delete(victim.assetId);
+            totalSize -= victim.size || 0;
+            this.log(`LRU evicted asset ${victim.assetId} (${victim.name})`);
+          }
         }
       }
     } catch (e) {
