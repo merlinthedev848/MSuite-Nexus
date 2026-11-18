@@ -1,0 +1,512 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MSuite CodeHandler | GitHub Private Proxy</title>
+  <link rel="stylesheet" href="/app.css">
+  <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='.9em' font-size='90'>🛡️</text></svg>">
+</head>
+<body class="dark-theme">
+  <div id="app">
+    <!-- Top Navigation Bar -->
+    <header class="navbar">
+      <div class="nav-brand">
+        <div class="brand-logo">
+          <span class="logo-icon">⚡</span>
+          <div class="brand-titles">
+            <span class="brand-family">MSUITE</span>
+            <span class="brand-product">CodeHandler</span>
+          </div>
+        </div>
+        <div class="connection-status" id="connectionStatus" title="SSE Realtime Stream">
+          <span class="status-dot"></span>
+          <span class="status-label">Connecting...</span>
+        </div>
+      </div>
+
+      <div class="nav-center">
+        <div class="gh-rate-pill" id="ghRatePill" title="GitHub Upstream Rate Limits">
+          <span class="gh-icon">🐙</span>
+          <span class="gh-label">GitHub API:</span>
+          <span class="gh-value" id="ghRateRemaining">--</span>
+          <span class="gh-reset" id="ghRateReset"></span>
+        </div>
+      </div>
+
+      <div class="nav-actions">
+        <div id="authStatusPill" class="auth-pill">
+          <span class="auth-user">Admin</span>
+          <button id="btnSwitchToken" class="btn-sm btn-ghost" title="Change Admin Token">Switch Key</button>
+        </div>
+      </div>
+    </header>
+
+    <!-- Main Navigation Tabs -->
+    <nav class="nav-tabs">
+      <button class="tab-btn active" data-tab="overview">
+        <span class="tab-icon">📊</span> Telemetry &amp; Overview
+      </button>
+      <button class="tab-btn" data-tab="clients">
+        <span class="tab-icon">🔑</span> Client API Keys
+      </button>
+      <button class="tab-btn" data-tab="explorer">
+        <span class="tab-icon">📦</span> Repository Explorer
+      </button>
+      <button class="tab-btn" data-tab="live-logs">
+        <span class="tab-icon">📡</span> Live Traffic Stream
+        <span class="badge-counter" id="logCounter">0</span>
+      </button>
+      <button class="tab-btn" data-tab="diagnostics">
+        <span class="tab-icon">🛠️</span> Diagnostics &amp; Cache
+      </button>
+    </nav>
+
+    <!-- Main Container -->
+    <main class="content-container">
+      <!-- 1. OVERVIEW TAB -->
+      <section id="tab-overview" class="tab-content active">
+        <div class="metrics-grid">
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Total Requests</span>
+              <span class="stat-icon">📈</span>
+            </div>
+            <div class="stat-value" id="statTotalRequests">0</div>
+            <div class="stat-breakdown" id="statStatusPills">
+              <span class="status-tag tag-2xx">2xx: 0</span>
+              <span class="status-tag tag-3xx">3xx: 0</span>
+              <span class="status-tag tag-4xx">4xx: 0</span>
+              <span class="status-tag tag-5xx">5xx: 0</span>
+            </div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Bandwidth Streamed</span>
+              <span class="stat-icon">💾</span>
+            </div>
+            <div class="stat-value" id="statBytesStreamed">0 MB</div>
+            <div class="stat-sub">Direct binary streaming</div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Cache Hit Ratio</span>
+              <span class="stat-icon">⚡</span>
+            </div>
+            <div class="stat-value" id="statCacheHitRate">100%</div>
+            <div class="stat-sub" id="statCacheRatioSub">0 hits / 0 misses</div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Avg Latency</span>
+              <span class="stat-icon">⏱️</span>
+            </div>
+            <div class="stat-value" id="statLatencyAvg">0 ms</div>
+            <div class="stat-sub" id="statLatencyP95">p95: 0 ms</div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Active Clients</span>
+              <span class="stat-icon">👥</span>
+            </div>
+            <div class="stat-value" id="statActiveClients">0</div>
+            <div class="stat-sub" id="statTotalClientsSub">0 registered apps</div>
+          </div>
+
+          <div class="card stat-card">
+            <div class="stat-header">
+              <span class="stat-title">Service Uptime</span>
+              <span class="stat-icon">🟢</span>
+            </div>
+            <div class="stat-value" id="statUptime">0m 0s</div>
+            <div class="stat-sub" id="statMemorySub">Heap: -- MB</div>
+          </div>
+        </div>
+
+        <div class="overview-details-grid">
+          <!-- Quick Integration Guide -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Proxy Quick Integration</h3>
+              <span class="badge">v1 API</span>
+            </div>
+            <p class="text-secondary text-sm">
+              MSuite apps call this proxy using per-app API keys. The proxy holds the GitHub credential and serves private assets, updates, and files.
+            </p>
+            <div class="endpoint-list">
+              <div class="endpoint-item">
+                <span class="method get">GET</span>
+                <code>/v1/repos/{owner}/{repo}/update?current=1.2.0</code>
+                <span class="endpoint-desc">Check for updates</span>
+              </div>
+              <div class="endpoint-item">
+                <span class="method get">GET</span>
+                <code>/v1/repos/{owner}/{repo}/releases/latest</code>
+                <span class="endpoint-desc">Latest release &amp; assets</span>
+              </div>
+              <div class="endpoint-item">
+                <span class="method get">GET</span>
+                <code>/v1/repos/{owner}/{repo}/releases/assets/{id}</code>
+                <span class="endpoint-desc">Stream release binary</span>
+              </div>
+              <div class="endpoint-item">
+                <span class="method get">GET</span>
+                <code>/v1/repos/{owner}/{repo}/raw/{path}?ref=main</code>
+                <span class="endpoint-desc">Read private file</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Top Client Apps -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Top Client Applications</h3>
+              <button class="btn-sm btn-outline" id="btnRefreshOverview">Refresh</button>
+            </div>
+            <div id="topClientsTableContainer">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Client</th>
+                    <th>Requests</th>
+                    <th>Bandwidth</th>
+                    <th>Last Active</th>
+                  </tr>
+                </thead>
+                <tbody id="topClientsTableBody">
+                  <tr><td colspan="4" class="text-center text-muted">No client activity recorded yet</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 2. CLIENTS TAB -->
+      <section id="tab-clients" class="tab-content">
+        <div class="tab-action-bar">
+          <div class="search-bar">
+            <input type="text" id="clientSearchInput" placeholder="Filter clients by name or repo...">
+          </div>
+          <button class="btn btn-primary" id="btnOpenAddClientModal">
+            <span>+</span> New Client Key
+          </button>
+        </div>
+
+        <div class="card">
+          <div class="table-responsive">
+            <table class="data-table" id="clientsTable">
+              <thead>
+                <tr>
+                  <th>Status</th>
+                  <th>Client Name</th>
+                  <th>Description</th>
+                  <th>Allowed Repositories</th>
+                  <th>Permissions</th>
+                  <th>Requests</th>
+                  <th>Last Seen</th>
+                  <th class="text-right">Actions</th>
+                </tr>
+              </thead>
+              <tbody id="clientsTableBody">
+                <tr><td colspan="8" class="text-center text-muted">Loading clients...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 3. REPOSITORY EXPLORER TAB -->
+      <section id="tab-explorer" class="tab-content">
+        <div class="explorer-grid">
+          <!-- Repo Selector Sidebar -->
+          <div class="card explorer-sidebar">
+            <div class="card-header">
+              <h3>Available Repositories</h3>
+              <button class="btn-icon" id="btnRefreshRepos" title="Refresh repositories">🔄</button>
+            </div>
+            <div class="repo-search-box">
+              <input type="text" id="repoSearchInput" placeholder="Search repositories...">
+            </div>
+            <div class="repo-list" id="repoList">
+              <div class="text-center text-muted p-4">Loading repositories from GitHub...</div>
+            </div>
+          </div>
+
+          <!-- Repo Details & Releases View -->
+          <div class="card explorer-main">
+            <div id="repoPlaceholder" class="empty-state">
+              <span class="empty-icon">📂</span>
+              <h3>Select a repository to explore</h3>
+              <p class="text-secondary">View releases, download assets, and generate copy-paste client code snippets.</p>
+            </div>
+
+            <div id="repoDetails" class="hidden">
+              <div class="repo-header-banner">
+                <div>
+                  <h2 id="repoTitle">owner/repo</h2>
+                  <p id="repoDescription" class="text-secondary text-sm"></p>
+                </div>
+                <div class="repo-badges">
+                  <span class="badge" id="repoVisibilityBadge">Private</span>
+                  <span class="badge badge-outline" id="repoBranchBadge">main</span>
+                </div>
+              </div>
+
+              <!-- Integration Snippets -->
+              <div class="snippet-box">
+                <div class="snippet-header">
+                  <span class="snippet-title">Client Integration Snippet</span>
+                  <div class="snippet-controls">
+                    <label class="text-xs text-muted">Client Key:</label>
+                    <select id="snippetClientSelect" class="snippet-select">
+                      <option value="">&lt;YOUR_API_KEY&gt;</option>
+                    </select>
+                    <div class="snippet-tabs">
+                      <button class="snippet-tab-btn active" data-lang="curl">cURL</button>
+                      <button class="snippet-tab-btn" data-lang="ps">PowerShell</button>
+                      <button class="snippet-tab-btn" data-lang="node">Node.js</button>
+                      <button class="snippet-tab-btn" data-lang="python">Python</button>
+                    </div>
+                  </div>
+                </div>
+                <div class="snippet-code-wrap">
+                  <pre><code id="snippetCode"></code></pre>
+                  <button class="btn-sm btn-ghost copy-btn" id="btnCopySnippet">Copy</button>
+                </div>
+              </div>
+
+              <!-- Releases List -->
+              <div class="releases-section">
+                <div class="releases-header">
+                  <h3>Releases &amp; Assets</h3>
+                  <button class="btn-sm btn-outline" id="btnRefreshReleases">Refresh</button>
+                </div>
+                <div id="releasesContainer">
+                  <div class="text-center text-muted p-4">Loading releases...</div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <!-- 4. LIVE LOGS TAB -->
+      <section id="tab-live-logs" class="tab-content">
+        <div class="tab-action-bar">
+          <div class="log-controls">
+            <button class="btn-sm btn-outline" id="btnToggleLogPause">⏸️ Pause Stream</button>
+            <button class="btn-sm btn-ghost" id="btnClearLogs">Clear Log</button>
+            <label class="checkbox-label text-sm">
+              <input type="checkbox" id="chkAutoScroll" checked> Auto-scroll
+            </label>
+          </div>
+          <div class="log-filter">
+            <input type="text" id="logFilterInput" placeholder="Filter logs by client, path, status, IP...">
+          </div>
+        </div>
+
+        <div class="card terminal-card">
+          <div class="terminal-body" id="terminalContainer">
+            <table class="terminal-table">
+              <thead>
+                <tr>
+                  <th style="width: 140px;">Timestamp</th>
+                  <th style="width: 80px;">Status</th>
+                  <th style="width: 70px;">Method</th>
+                  <th>Path</th>
+                  <th style="width: 130px;">Client</th>
+                  <th style="width: 110px;">IP</th>
+                  <th style="width: 80px;">Latency</th>
+                  <th style="width: 80px;">Bytes</th>
+                </tr>
+              </thead>
+              <tbody id="terminalTableBody">
+                <tr class="log-empty-row"><td colspan="8" class="text-center text-muted">Awaiting incoming proxy requests...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. DIAGNOSTICS & CACHE TAB -->
+      <section id="tab-diagnostics" class="tab-content">
+        <div class="diagnostics-grid">
+          <!-- Upstream GitHub Diagnostics -->
+          <div class="card">
+            <div class="card-header">
+              <h3>GitHub Upstream Diagnostics</h3>
+              <button class="btn btn-outline btn-sm" id="btnRunDiagnostics">Run Diagnostic Ping</button>
+            </div>
+            <p class="text-secondary text-sm">Tests upstream GitHub connectivity, response latency, token permissions, and rate limits.</p>
+            <div class="diag-output" id="diagOutput">
+              <div class="text-muted text-sm">Click "Run Diagnostic Ping" to test connection.</div>
+            </div>
+          </div>
+
+          <!-- In-Memory Cache Manager -->
+          <div class="card">
+            <div class="card-header">
+              <h3>Memory Cache Management</h3>
+              <button class="btn btn-danger btn-sm" id="btnPurgeAllCache">Purge Entire Cache</button>
+            </div>
+            <p class="text-secondary text-sm">MSuite-CodeHandler caches GitHub JSON endpoints and ETags in memory with automatic TTL expiration.</p>
+            <div class="cache-stats-box" id="cacheStatsBox">
+              <div class="cache-stat-item">
+                <span class="cache-stat-label">Cached Entries:</span>
+                <span class="cache-stat-val" id="cacheEntriesCount">0</span>
+              </div>
+              <div class="cache-stat-item">
+                <span class="cache-stat-label">Cache Hit Ratio:</span>
+                <span class="cache-stat-val" id="cacheHitRatioVal">100%</span>
+              </div>
+            </div>
+            <div class="cache-purge-group">
+              <input type="text" id="cachePurgePatternInput" placeholder="Purge by repo substring (e.g. MSuite-SIP)">
+              <button class="btn btn-outline btn-sm" id="btnPurgePattern">Purge Match</button>
+            </div>
+            <div class="cache-entries-list" id="cacheEntriesList">
+              <div class="text-muted text-xs p-2">Cache is empty or not yet loaded</div>
+            </div>
+          </div>
+
+          <!-- GitHub Webhook Receiver Setup -->
+          <div class="card full-width-card">
+            <div class="card-header">
+              <h3>Real-Time GitHub Webhooks</h3>
+              <span class="badge badge-success">Automated Cache Purge</span>
+            </div>
+            <p class="text-secondary text-sm">
+              Configure a webhook on your GitHub organization or repository. When a release is published or tags are pushed, GitHub notifies CodeHandler to instantly invalidate cached metadata without waiting for TTL expiration.
+            </p>
+            <div class="webhook-info-grid">
+              <div class="info-block">
+                <label class="info-label">Payload URL</label>
+                <div class="copy-input-group">
+                  <input type="text" id="webhookUrlInput" readonly value="">
+                  <button class="btn-sm btn-ghost" id="btnCopyWebhookUrl">Copy</button>
+                </div>
+              </div>
+              <div class="info-block">
+                <label class="info-label">Content type</label>
+                <div class="info-val"><code>application/json</code></div>
+              </div>
+              <div class="info-block">
+                <label class="info-label">Secret</label>
+                <div class="info-val">Configured in <code>WEBHOOK_SECRET</code> (optional HMAC-SHA256)</div>
+              </div>
+              <div class="info-block">
+                <label class="info-label">Events to select</label>
+                <div class="info-val"><code>Releases</code>, <code>Pushes</code></div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
+    </main>
+
+    <!-- MODAL: ADD CLIENT -->
+    <div class="modal-backdrop hidden" id="modalAddClient">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Create Client API Key</h3>
+          <button class="modal-close" id="btnCloseAddClientModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="form-group">
+            <label class="form-label" for="newClientName">Client App Name *</label>
+            <input type="text" id="newClientName" class="form-input" placeholder="e.g. msuite-sip, msuite-sentinel">
+            <span class="form-hint">Unique identifier for the calling application.</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newClientDesc">Description</label>
+            <input type="text" id="newClientDesc" class="form-input" placeholder="e.g. SIP Desktop Client release updater">
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newClientRepos">Allowed Repositories *</label>
+            <input type="text" id="newClientRepos" class="form-input" value="*" placeholder="owner/repo, owner/*, or *">
+            <span class="form-hint">Comma-separated patterns. Example: <code>merlinthedev848/MSuite-SIP, merlinthedev848/*</code></span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label">Allowed Permissions *</label>
+            <div class="checkbox-group">
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permReleases" checked>
+                <span>Releases &amp; Updates</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permRaw" checked>
+                <span>Raw Files</span>
+              </label>
+              <label class="checkbox-pill">
+                <input type="checkbox" id="permArchive" checked>
+                <span>Source Archives (zip/tar)</span>
+              </label>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btnCancelAddClient">Cancel</button>
+          <button class="btn btn-primary" id="btnSaveNewClient">Generate Key</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: KEY CREATED / ROTATED -->
+    <div class="modal-backdrop hidden" id="modalKeyDisplay">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3 class="text-emerald">🔑 API Key Generated</h3>
+          <button class="modal-close" id="btnCloseKeyModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <div class="alert-box alert-warning">
+            ⚠️ <strong>Save this key now!</strong> It will never be displayed again. Only a cryptographic SHA-256 hash is retained on the server.
+          </div>
+          <div class="form-group mt-3">
+            <label class="form-label" id="keyDisplayClientLabel">API Key:</label>
+            <div class="key-display-box">
+              <code id="keyDisplayValue">msk_...</code>
+              <button class="btn-sm btn-primary" id="btnCopyKey">Copy Key</button>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="btnDoneKeyDisplay">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: ADMIN LOGIN -->
+    <div class="modal-backdrop hidden" id="modalAdminLogin">
+      <div class="modal-card">
+        <div class="modal-header">
+          <h3>Admin Authentication</h3>
+        </div>
+        <div class="modal-body">
+          <p class="text-secondary text-sm">Enter the <code>ADMIN_TOKEN</code> configured on the MSuite CodeHandler server:</p>
+          <div class="form-group mt-3">
+            <input type="password" id="inputAdminToken" class="form-input" placeholder="msuite_adm_...">
+            <span class="form-hint" id="loginErrorMsg"></span>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-primary" id="btnLoginSubmit">Authenticate</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- TOAST NOTIFICATIONS -->
+    <div class="toast-container" id="toastContainer"></div>
+  </div>
+
+  <script src="/app.js" type="module"></script>
+</body>
+</html>

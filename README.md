@@ -1,130 +1,137 @@
-# MSuite CodeHandler
+# MSuite CodeHandler 2.0
 
-GitHub private proxy for the MSuite product family. It holds a **single GitHub token** server-side and lets MSuite apps (SIP, Sentinel, HoneyPot, MStream, …) download private **release assets, update metadata, raw files and source archives** using their own **per-app API keys**. No GitHub credentials ever ship inside a client.
+> **GitHub Private Proxy & Developer Portal for the MSuite Product Family**
+
+MSuite CodeHandler securely bridges client applications (SIP, Sentinel, HoneyPot, MStream, etc.) with private GitHub repositories. It centralizes repository access, stores GitHub access tokens server-side, and serves private **release binaries, update checks, raw files, and source archives** using scoped, per-app API keys.
+
+---
+
+## ⚡ What's New in v2.0
+
+- 🖥️ **Full Web UI / Admin Dashboard**: Modern, responsive dark-themed dashboard at `/` with real-time telemetry, interactive repository explorer, client key manager, and live request streaming.
+- 📡 **Real-Time Traffic Terminal (SSE)**: Live streaming of incoming proxy requests with status codes, latency, client identity, bandwidth, and pause/auto-scroll controls.
+- 🔀 **Multi-Token Failover & Rotation**: Configure a pool of GitHub PATs (`GITHUB_TOKENS=t1,t2`); CodeHandler automatically switches tokens if one approaches rate limits or hits 403.
+- 🪝 **GitHub Webhook Receiver**: `/v1/webhook` endpoint with HMAC-SHA256 signature verification that automatically purges memory caches when releases are published or commits are pushed.
+- 🛠️ **Upstream Diagnostics & Cache Manager**: Built-in latency ping tool, token permission inspector, and pattern-based cache purger.
+- 📋 **Interactive Code Snippet Generator**: Copy-paste integration snippets in **cURL**, **PowerShell**, **Node.js**, and **Python** for any release asset.
+- ⏱️ **Zero-Downtime Hot Reloading**: Add, update, rotate, or disable client keys on the fly without server restarts.
+
+---
+
+## Architecture
 
 ```
-MSuite app ──(API key)──▶ CodeHandler ──(GitHub token)──▶ api.github.com
-                                     ◀── streams asset ── signed storage URL (token never forwarded)
+                                      ┌──▶ Upstream GitHub API (api.github.com)
+                                      │    (Token pool + ETag/TTL cache + Failover)
+MSuite App ──(API Key)──▶ CodeHandler ┼──▶ Signed Storage URLs (AWS S3/Azure)
+                          (Proxy Core)│    (Streaming binary pipeline, token never forwarded)
+                                      └──▶ Admin Dashboard / Web UI
+                                           (SSE Live Traffic, Metrics, Key Manager)
 ```
 
-## Features
+---
 
-- Per-client API keys, stored only as SHA-256 hashes
-- Per-client repo allow-list (`owner/repo`, `owner/*`, `*`) and permissions (`releases`, `raw`, `archive`)
-- Release metadata rewritten so download URLs point at the proxy; GitHub URLs are stripped out
-- Streaming downloads with `Range` support (resumable)
-- Built-in update check (`/update?current=1.2.3`)
-- Redirects followed manually so the GitHub token is **only** sent to the GitHub API
-- In-memory metadata cache (TTL + ETag), per-client rate limiting, path/ref validation
-- Hot reloads `clients.json` with no restart; a bad edit keeps the previous config
-- JSON request logs, Docker image with healthcheck
+## Quick Start
 
-## Quick start
-
+### 1. Installation
 ```bash
+git clone https://github.com/merlinthedev848/MSuite-CodeHandler.git
+cd MSuite-CodeHandler
 npm install
-cp .env.example .env          # set GITHUB_TOKEN and PUBLIC_BASE_URL
+```
+
+### 2. Configure Environment
+```bash
+cp .env.example .env
+```
+Edit `.env` to set:
+```ini
+GITHUB_TOKEN=ghp_your_fine_grained_pat
+ADMIN_TOKEN=msuite_secret_admin_token
+PUBLIC_BASE_URL=https://code.example.com
+```
+
+### 3. Generate a Client API Key
+You can generate keys via the **Web UI** or via CLI:
+```bash
 npm run new-key -- msuite-sip merlinthedev848/MSuite-SIP --perms releases
+```
+
+### 4. Start the Service
+```bash
 npm start
 ```
 
-`new-key` writes the hashed key into `clients.json` and prints the plaintext key **once**.
+Access the dashboard at `http://localhost:8080/`.
 
-On Windows PowerShell, set env vars instead of using `.env` (the server reads `process.env`):
+---
 
-```powershell
-$env:GITHUB_TOKEN="github_pat_..."; npm start
-```
-
-### Docker
+## Docker Deployment
 
 ```bash
 docker compose up -d --build
 ```
 
-`clients.json` is mounted read-only at `/config/clients.json`.
+- Web UI & Proxy exposed on port `8080`
+- `clients.json` mounted at `/config/clients.json` (hot reloads automatically)
+- Container includes Alpine health checks
 
-### GitHub token
+---
 
-Use a **fine-grained personal access token** (or GitHub App token) scoped to only the repos you expose, with read-only **Contents** and **Metadata** permissions.
+## Client API Reference (`/v1`)
 
-## API
-
-Every `/v1` request needs `Authorization: Bearer <api-key>` (or `X-API-Key: <api-key>`).
+All `/v1` endpoints require authentication via:
+`Authorization: Bearer <client-api-key>` or `X-API-Key: <client-api-key>`
 
 | Method | Path | Permission | Description |
 |---|---|---|---|
-| GET | `/health` | none | Liveness check (no auth) |
-| GET | `/v1/me` | any | Shows the calling client's name, repos and permissions |
-| GET | `/v1/repos/:owner/:repo/releases?per_page=10` | releases | Lists releases (drafts excluded) |
-| GET | `/v1/repos/:owner/:repo/releases/latest[?prerelease=true]` | releases | Latest release |
-| GET | `/v1/repos/:owner/:repo/releases/tags/:tag` | releases | Release by tag |
-| GET | `/v1/repos/:owner/:repo/releases/assets/:id` | releases | Streams the asset binary (supports `Range`) |
-| GET | `/v1/repos/:owner/:repo/update?current=1.2.3[&prerelease=true]` | releases | Update check |
-| GET | `/v1/repos/:owner/:repo/raw/<path>?ref=main` | raw | Raw file contents |
-| GET | `/v1/repos/:owner/:repo/archive?ref=main&format=zip\|tar` | archive | Source archive |
+| `GET` | `/health` | *none* | Service health and liveness check |
+| `GET` | `/v1/me` | *any* | Verifies key and returns allowed repos & permissions |
+| `GET` | `/v1/repos/:owner/:repo/update?current=1.2.0` | `releases` | Checks if a newer release exists; returns download URLs |
+| `GET` | `/v1/repos/:owner/:repo/releases/latest` | `releases` | Fetches the latest published release and rewritten assets |
+| `GET` | `/v1/repos/:owner/:repo/releases` | `releases` | Lists releases (drafts excluded, supports `?per_page=N`) |
+| `GET` | `/v1/repos/:owner/:repo/releases/tags/:tag` | `releases` | Fetches release by tag name |
+| `GET` | `/v1/repos/:owner/:repo/releases/assets/:id` | `releases` | Streams the binary asset (supports HTTP `Range` / resume) |
+| `GET` | `/v1/repos/:owner/:repo/raw/*path?ref=main` | `raw` | Streams raw file content with safe Content-Type |
+| `GET` | `/v1/repos/:owner/:repo/archive?ref=main&format=zip` | `archive` | Streams repo source archive (`zip` or `tar`) |
+| `POST` | `/v1/webhook` | *none / HMAC* | GitHub webhook receiver for instant cache invalidation |
 
-### Update check example
+---
 
-```bash
-curl -H "Authorization: Bearer $KEY" \
-  "https://code.example.com/v1/repos/merlinthedev848/MSuite-SIP/update?current=1.4.0"
-```
+## Admin API Reference (`/api/admin`)
 
-```json
-{
-  "current": "1.4.0",
-  "latest_version": "v1.5.0",
-  "update_available": true,
-  "release": {
-    "tag_name": "v1.5.0",
-    "assets": [
-      { "id": 123, "name": "MSuite-SIP-Setup.exe", "size": 48211234,
-        "download_url": "https://code.example.com/v1/repos/merlinthedev848/MSuite-SIP/releases/assets/123" }
-    ]
-  }
-}
-```
+Requires `Authorization: Bearer <ADMIN_TOKEN>`.
 
-Download the asset with the same API key header on `download_url`.
+- `POST /api/admin/login` – Validate admin credentials
+- `GET /api/admin/overview` – Real-time metrics snapshot, rate limits, uptime, and client stats
+- `GET /api/admin/stream` – Server-Sent Events (SSE) live traffic and event stream
+- `GET /api/admin/clients` – List all configured client applications
+- `POST /api/admin/clients` – Create a new client and generate an API key
+- `PUT /api/admin/clients/:name` – Update repos, permissions, description, or disable client
+- `POST /api/admin/clients/:name/rotate-key` – Invalidate previous key and issue a new one
+- `DELETE /api/admin/clients/:name` – Remove client
+- `GET /api/admin/repos` – List repositories accessible via upstream GitHub token
+- `GET /api/admin/repos/:owner/:repo/releases` – Explore releases and binary assets
+- `GET /api/admin/cache` – Inspect cached endpoints and TTLs
+- `POST /api/admin/cache/clear` – Purge memory cache (all or by pattern)
+- `GET /api/admin/diagnostics` – Upstream GitHub latency ping and scope verification
 
-### Errors
+---
 
-JSON `{ "error": "<code>", "message": "..." }`:
-`401 unauthorized`, `403 forbidden`, `400 bad_request`, `404 not_found`, `429 rate_limited`, `502 upstream_auth | upstream_error`.
+## Security Model
 
-## clients.json
+1. **Credential Isolation**: GitHub personal access tokens are stored strictly server-side in memory and environment variables. Client applications receive only cryptographically random `msk_...` keys.
+2. **One-Way Hashing**: Client keys are hashed with `SHA-256` prior to storage in `clients.json`. Plaintext keys are never stored on disk.
+3. **Token-Leak Prevention on Storage Redirects**: GitHub redirects asset downloads to temporary pre-signed Amazon S3 / Azure storage URLs. CodeHandler intercepts redirects manually and strips the `Authorization` header before fetching from storage.
+4. **Content-Type Sniffing Protection**: Raw files are served with `X-Content-Type-Options: nosniff` and sanitised types to prevent XSS.
+5. **Path Traversal Protection**: Directory traversal (`..`), null bytes, and malicious ref names are blocked before reaching upstream.
 
-```json
-{
-  "clients": [
-    {
-      "name": "msuite-sip",
-      "keyHash": "<sha256 of the api key>",
-      "repos": ["merlinthedev848/MSuite-SIP"],
-      "permissions": ["releases"],
-      "disabled": false
-    }
-  ]
-}
-```
+---
 
-To rotate a key, delete the client entry and run `new-key` again. To revoke one, set `"disabled": true`. Both changes are picked up within about 5 seconds.
-
-## Configuration
-
-See [.env.example](.env.example). Key settings: `GITHUB_TOKEN` (required), `PUBLIC_BASE_URL`, `TRUST_PROXY`, `CACHE_TTL_SECONDS`, `RATE_LIMIT_PER_MINUTE`, `GITHUB_API_URL` (GitHub Enterprise).
-
-## Deployment notes
-
-- Run behind TLS (Caddy, nginx or Cloudflare) and set `TRUST_PROXY=true`.
-- Never commit `.env` or `clients.json`; both are git-ignored.
-- Rate limiting and caching are in-memory per instance.
-
-## Tests
+## Testing
 
 ```bash
 npm test
 ```
 
-The tests run against a fake GitHub server and cover auth, allow-lists, URL rewriting, token-leak protection on redirects, update checks, traversal rejection and rate limiting.
+Runs the automated test suite with a mock upstream GitHub server covering auth, access control, URL rewriting, streaming pipelines, token leak protection, admin CRUD, rate limiting, and webhooks.

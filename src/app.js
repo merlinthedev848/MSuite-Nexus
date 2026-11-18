@@ -1,9 +1,15 @@
 import express from 'express';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
 import { canAccess } from './clients.js';
 import { UpstreamError } from './github.js';
 import { compareVersions } from './version.js';
+import { createAdminRouter } from './admin.js';
+import { createWebhookHandler } from './webhook.js';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 const NAME_RE = /^[A-Za-z0-9_.-]{1,100}$/;
 const PASSTHROUGH_HEADERS = [
@@ -38,41 +44,111 @@ function validRef(ref) {
     !ref.includes('..') && !/[\s~^:?*\[\\]/.test(ref) && !ref.startsWith('/') && !ref.endsWith('/');
 }
 
-export function createApp({ config, clients, github, log = console.log }) {
+export function createApp({ config, clients, github, metrics, events, log = console.log }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
 
   const baseUrl = (req) => config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
 
-  // --- security headers + request log ---
+  // Preserve raw body on webhook route for HMAC verification
+  app.use('/v1/webhook', express.raw({ type: '*/*', limit: '2mb' }), (req, res, next) => {
+    if (Buffer.isBuffer(req.body)) {
+      req.rawBody = req.body.toString('utf8');
+      try {
+        req.body = JSON.parse(req.rawBody);
+      } catch {
+        req.body = {};
+      }
+    }
+    next();
+  });
+
+  // Regular body parsing for API endpoints
+  app.use(express.json({ limit: '2mb' }));
+
+  // Static files for the modern MSuite Admin UI
+  const publicDir = path.join(__dirname, '..', 'public');
+  app.use(express.static(publicDir, { maxAge: '1h', index: 'index.html' }));
+
+  // --- security headers + telemetry logging ---
   app.use((req, res, next) => {
     res.set({
       'X-Content-Type-Options': 'nosniff',
       'X-Frame-Options': 'DENY',
       'Referrer-Policy': 'no-referrer',
-      'Cache-Control': 'no-store',
     });
+
     const start = Date.now();
+    let bytesSent = 0;
+
+    // Intercept write / end to accurately track streaming byte counts
+    const origWrite = res.write;
+    const origEnd = res.end;
+    res.write = function (chunk, ...args) {
+      if (chunk) bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      return origWrite.call(this, chunk, ...args);
+    };
+    res.end = function (chunk, ...args) {
+      if (chunk) bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      return origEnd.call(this, chunk, ...args);
+    };
+
     res.on('finish', () => {
-      if (config.logRequests) {
-        log(JSON.stringify({
-          t: new Date().toISOString(),
-          client: req.client?.name ?? null,
+      const ms = Date.now() - start;
+      const clientName = req.client?.name ?? null;
+
+      // Don't record internal static file requests to keep telemetry focused on API traffic
+      const isApiTraffic = req.path.startsWith('/v1/') || req.path.startsWith('/api/');
+
+      if (isApiTraffic && metrics) {
+        const logEntry = metrics.recordRequest({
+          client: clientName,
           ip: req.ip,
           method: req.method,
           path: req.path,
           status: res.statusCode,
-          ms: Date.now() - start,
+          ms,
+          bytes: bytesSent,
+        });
+
+        events?.broadcast('log', logEntry);
+      }
+
+      if (config.logRequests && isApiTraffic) {
+        log(JSON.stringify({
+          t: new Date().toISOString(),
+          client: clientName,
+          ip: req.ip,
+          method: req.method,
+          path: req.path,
+          status: res.statusCode,
+          ms,
+          bytes: bytesSent,
         }));
       }
     });
+
     next();
   });
 
-  app.get('/health', (req, res) => res.json({ ok: true }));
+  // Liveness health check
+  app.get('/health', (req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
 
-  // --- auth ---
+  // Mount GitHub Webhook receiver
+  app.post('/v1/webhook', createWebhookHandler({
+    github,
+    events,
+    secret: config.webhookSecret,
+    log,
+  }));
+
+  // Mount Admin API router
+  if (metrics && events) {
+    app.use('/api/admin', createAdminRouter({ config, clients, github, metrics, events, log }));
+  }
+
+  // --- Client /v1 API ---
   const windows = new Map();
   const v1 = express.Router();
 
@@ -152,18 +228,20 @@ export function createApp({ config, clients, github, log = console.log }) {
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
-  // --- releases ---
+  // Releases listing
   v1.get('/repos/:owner/:repo/releases', repoGuard('releases'), wrap(async (req, res) => {
     const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 10, 1), 100);
     const list = await github.json(`${repoPath(req)}/releases?per_page=${perPage}`);
     res.json(list.filter((r) => !r.draft).map((r) => mapRelease(req, r)));
   }));
 
+  // Latest release
   v1.get('/repos/:owner/:repo/releases/latest', repoGuard('releases'), wrap(async (req, res) => {
     const rel = await latestRelease(req, req.query.prerelease === 'true');
     res.json(mapRelease(req, rel));
   }));
 
+  // Release by tag
   v1.get('/repos/:owner/:repo/releases/tags/:tag', repoGuard('releases'), wrap(async (req, res) => {
     if (!validRef(req.params.tag)) throw new HttpError(400, 'bad_request', 'Invalid tag');
     const rel = await github.json(`${repoPath(req)}/releases/tags/${enc(req.params.tag)}`);
@@ -171,6 +249,7 @@ export function createApp({ config, clients, github, log = console.log }) {
     res.json(mapRelease(req, rel));
   }));
 
+  // Download release asset
   v1.get('/repos/:owner/:repo/releases/assets/:id', repoGuard('releases'), wrap(async (req, res) => {
     if (!/^\d{1,20}$/.test(req.params.id)) throw new HttpError(400, 'bad_request', 'Invalid asset id');
     const upstream = await github.stream(`${repoPath(req)}/releases/assets/${req.params.id}`, {
@@ -194,7 +273,7 @@ export function createApp({ config, clients, github, log = console.log }) {
     });
   }));
 
-  // --- raw files: /raw/path/to/file?ref=main ---
+  // Raw files
   v1.get('/repos/:owner/:repo/raw/*path', repoGuard('raw'), wrap(async (req, res) => {
     const segments = [].concat(req.params.path || []);
     if (!segments.length || segments.some((s) => !s || s === '.' || s === '..' || /[\/\\\0]/.test(s))) {
@@ -209,7 +288,7 @@ export function createApp({ config, clients, github, log = console.log }) {
     await pipeUpstream(upstream, res, { forceDownloadType: true });
   }));
 
-  // --- archives: /archive?ref=main&format=zip|tar ---
+  // Source archive
   v1.get('/repos/:owner/:repo/archive', repoGuard('archive'), wrap(async (req, res) => {
     const format = (req.query.format || 'zip').toString();
     if (format !== 'zip' && format !== 'tar') throw new HttpError(400, 'bad_request', 'format must be zip or tar');
@@ -222,8 +301,19 @@ export function createApp({ config, clients, github, log = console.log }) {
 
   app.use('/v1', v1);
 
-  app.use((req, res, next) => next(new HttpError(404, 'not_found', 'Route not found')));
+  // 404 for unmatched API routes
+  app.use('/v1', (req, res, next) => next(new HttpError(404, 'not_found', 'API route not found')));
+  app.use('/api', (req, res, next) => next(new HttpError(404, 'not_found', 'Admin route not found')));
 
+  // SPA fallback: index.html for dashboard navigation
+  app.use((req, res, next) => {
+    if (req.method === 'GET' && !req.path.startsWith('/v1') && !req.path.startsWith('/api')) {
+      return res.sendFile(path.join(publicDir, 'index.html'));
+    }
+    next(new HttpError(404, 'not_found', 'Route not found'));
+  });
+
+  // Global Error Handler
   // eslint-disable-next-line no-unused-vars
   app.use((err, req, res, next) => {
     let status = 500;
@@ -260,7 +350,6 @@ async function pipeUpstream(upstream, res, { forceDownloadType = false } = {}) {
     const v = upstream.headers.get(h);
     if (v) res.set(h, v);
   }
-  // Never let proxied content render as HTML in a browser.
   if (forceDownloadType) {
     const ct = (res.get('content-type') || '').toLowerCase();
     if (!ct || /html|xml|svg|javascript|vnd\.github/.test(ct)) res.set('content-type', 'application/octet-stream');

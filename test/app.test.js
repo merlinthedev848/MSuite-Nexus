@@ -1,17 +1,23 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import { createHmac } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { ClientStore, hashKey, parseClients } from '../src/clients.js';
 import { GitHub } from '../src/github.js';
+import { MetricsCollector } from '../src/metrics.js';
+import { EventBroker } from '../src/events.js';
 import { compareVersions } from '../src/version.js';
 
 const TOKEN = 'ghp_test_token';
+const ADMIN_TOKEN = 'adm_super_secret_token_123';
+const WEBHOOK_SECRET = 'whsec_test_secret_xyz';
 const KEY_A = 'msk_client_a';
 const KEY_B = 'msk_client_b';
-const seen = []; // requests received by fake GitHub
+const seen = [];
 
 let ghServer, ghPort, appServer, base;
+let testMetrics, testEvents;
 
 const release = (tag, extra = {}) => ({
   id: 1,
@@ -30,7 +36,15 @@ const release = (tag, extra = {}) => ({
 before(async () => {
   ghServer = http.createServer((req, res) => {
     seen.push({ url: req.url, host: req.headers.host, auth: req.headers.authorization });
-    const json = (code, body) => { res.writeHead(code, { 'content-type': 'application/json' }); res.end(JSON.stringify(body)); };
+    const json = (code, body) => {
+      res.writeHead(code, {
+        'content-type': 'application/json',
+        'x-ratelimit-limit': '5000',
+        'x-ratelimit-remaining': '4999',
+        'x-ratelimit-reset': String(Math.floor(Date.now() / 1000) + 3600),
+      });
+      res.end(JSON.stringify(body));
+    };
 
     if (req.url.startsWith('/s3/')) {
       res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename=app.zip' });
@@ -40,12 +54,17 @@ before(async () => {
 
     const u = new URL(req.url, 'http://x');
     switch (true) {
+      case u.pathname === '/user':
+        return json(200, { login: 'merlinthedev848', name: 'Merlin Dev', type: 'User' });
+      case u.pathname === '/user/repos':
+        return json(200, [
+          { full_name: 'acme/app', name: 'app', owner: { login: 'acme' }, private: true, default_branch: 'main' },
+        ]);
       case u.pathname === '/repos/acme/app/releases/latest':
         return json(200, release('v1.2.0'));
       case u.pathname === '/repos/acme/app/releases':
         return json(200, [release('v1.3.0-beta.1', { prerelease: true }), release('v1.2.0'), release('v9.9.9', { draft: true })]);
       case u.pathname === '/repos/acme/app/releases/assets/42':
-        // Cross-origin redirect (localhost vs 127.0.0.1): token must NOT follow.
         res.writeHead(302, { location: `http://localhost:${ghPort}/s3/signed?sig=abc` });
         return res.end();
       case u.pathname === '/repos/acme/app/contents/config/settings.json':
@@ -68,9 +87,33 @@ before(async () => {
       { name: 'off', keyHash: hashKey('msk_off'), repos: ['*'], disabled: true },
     ],
   });
-  const config = { trustProxy: false, publicBaseUrl: 'https://proxy.example', rateLimitPerMinute: 1000, logRequests: false };
-  const github = new GitHub({ token: TOKEN, apiUrl: `http://127.0.0.1:${ghPort}`, cacheTtlMs: 0 });
-  const app = createApp({ config, clients, github, log: () => {} });
+  const config = {
+    trustProxy: false,
+    publicBaseUrl: 'https://proxy.example',
+    rateLimitPerMinute: 1000,
+    logRequests: false,
+    adminToken: ADMIN_TOKEN,
+    webhookSecret: WEBHOOK_SECRET,
+  };
+
+  testMetrics = new MetricsCollector();
+  testEvents = new EventBroker();
+  const github = new GitHub({
+    token: TOKEN,
+    apiUrl: `http://127.0.0.1:${ghPort}`,
+    cacheTtlMs: 60000,
+    metrics: testMetrics,
+  });
+
+  const app = createApp({
+    config,
+    clients,
+    github,
+    metrics: testMetrics,
+    events: testEvents,
+    log: () => {},
+  });
+
   appServer = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   base = `http://127.0.0.1:${appServer.address().port}`;
 });
@@ -83,9 +126,21 @@ after(() => {
 const get = (path, key = KEY_A, headers = {}) =>
   fetch(base + path, { headers: key ? { Authorization: `Bearer ${key}`, ...headers } : headers });
 
+const adminReq = (path, method = 'GET', body = null, token = ADMIN_TOKEN) =>
+  fetch(base + path, {
+    method,
+    headers: {
+      Authorization: `Bearer ${token}`,
+      'Content-Type': 'application/json',
+    },
+    body: body ? JSON.stringify(body) : undefined,
+  });
+
 test('health is public', async () => {
   const r = await get('/health', null);
   assert.equal(r.status, 200);
+  const data = await r.json();
+  assert.equal(data.ok, true);
 });
 
 test('rejects missing, invalid and disabled keys', async () => {
@@ -159,7 +214,6 @@ test('archive download', async () => {
 });
 
 test('rejects traversal and bad input', async () => {
-  // fetch() normalizes dot-segments client-side, so send the raw path with node:http.
   const rawStatus = (path) => new Promise((resolve, reject) => {
     http.get({ host: '127.0.0.1', port: appServer.address().port, path, headers: { Authorization: `Bearer ${KEY_A}` } }, (res) => {
       res.resume();
@@ -190,6 +244,98 @@ test('rate limiting', async () => {
   assert.equal((await fetch(url, h)).status, 200);
   assert.equal((await fetch(url, h)).status, 429);
   s.close();
+});
+
+test('Admin API authentication & overview', async () => {
+  // Missing or wrong token
+  assert.equal((await adminReq('/api/admin/overview', 'GET', null, 'wrong')).status, 401);
+
+  // Valid token
+  const res = await adminReq('/api/admin/overview');
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.ok(data.totalRequests >= 0);
+  assert.equal(data.publicBaseUrl, 'https://proxy.example');
+  assert.ok(data.githubRateLimits);
+});
+
+test('Admin API client CRUD and key rotation', async () => {
+  // List clients
+  const list = await (await adminReq('/api/admin/clients')).json();
+  assert.ok(list.some((c) => c.name === 'a'));
+
+  // Add new client
+  const created = await (await adminReq('/api/admin/clients', 'POST', {
+    name: 'test-agent',
+    repos: ['acme/app'],
+    permissions: ['releases', 'raw'],
+    description: 'Unit test agent',
+  })).json();
+
+  assert.equal(created.ok, true);
+  assert.equal(created.client.name, 'test-agent');
+  assert.ok(created.key.startsWith('msk_'));
+
+  // Test that the newly created client key works on /v1/me
+  const meRes = await get('/v1/me', created.key);
+  assert.equal(meRes.status, 200);
+  assert.equal((await meRes.json()).name, 'test-agent');
+
+  // Rotate key
+  const rotated = await (await adminReq('/api/admin/clients/test-agent/rotate-key', 'POST')).json();
+  assert.equal(rotated.ok, true);
+  assert.notEqual(rotated.key, created.key);
+
+  // Old key should fail, new key should work
+  assert.equal((await get('/v1/me', created.key)).status, 401);
+  assert.equal((await get('/v1/me', rotated.key)).status, 200);
+
+  // Toggle disabled
+  await adminReq('/api/admin/clients/test-agent', 'PUT', { disabled: true });
+  assert.equal((await get('/v1/me', rotated.key)).status, 401);
+
+  // Delete client
+  const delRes = await adminReq('/api/admin/clients/test-agent', 'DELETE');
+  assert.equal(delRes.status, 200);
+});
+
+test('Admin diagnostics and cache clear', async () => {
+  const diagRes = await adminReq('/api/admin/diagnostics');
+  assert.equal(diagRes.status, 200);
+  const diag = await diagRes.json();
+  assert.equal(diag.ok, true);
+  assert.equal(diag.user.login, 'merlinthedev848');
+
+  // Purge cache
+  const purgeRes = await adminReq('/api/admin/cache/clear', 'POST', { pattern: 'acme' });
+  assert.equal(purgeRes.status, 200);
+  const purge = await purgeRes.json();
+  assert.equal(purge.ok, true);
+});
+
+test('GitHub Webhook with HMAC signature invalidates cache', async () => {
+  const payload = JSON.stringify({
+    action: 'published',
+    repository: { full_name: 'acme/app' },
+    release: { tag_name: 'v2.0.0' },
+  });
+
+  const sig = 'sha256=' + createHmac('sha256', WEBHOOK_SECRET).update(payload).digest('hex');
+
+  const res = await fetch(base + '/v1/webhook', {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      'X-GitHub-Event': 'release',
+      'X-Hub-Signature-256': sig,
+    },
+    body: payload,
+  });
+
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.repository, 'acme/app');
 });
 
 test('clients file validation', () => {

@@ -1,6 +1,8 @@
 import { loadConfig } from './config.js';
 import { ClientStore } from './clients.js';
 import { GitHub } from './github.js';
+import { MetricsCollector } from './metrics.js';
+import { EventBroker } from './events.js';
 import { createApp } from './app.js';
 
 const log = (msg) => console.log(msg);
@@ -15,30 +17,46 @@ try {
 
 const clients = new ClientStore(config.clientsFile);
 try {
-  log(`loaded ${clients.load()} active clients from ${config.clientsFile}`);
+  log(`Loaded ${clients.load()} active clients from ${config.clientsFile}`);
 } catch (e) {
   console.error(`Failed to load clients file ${config.clientsFile}: ${e.message}`);
   process.exit(1);
 }
 clients.watch(log);
 
+const metrics = new MetricsCollector();
+const events = new EventBroker();
+
 const github = new GitHub({
-  token: config.githubToken,
+  tokens: config.githubTokens,
   apiUrl: config.githubApiUrl,
   cacheTtlMs: config.cacheTtlMs,
   cacheMaxEntries: config.cacheMaxEntries,
+  metrics,
 });
 
-const app = createApp({ config, clients, github, log });
+const app = createApp({ config, clients, github, metrics, events, log });
+
 const server = app.listen(config.port, config.host, () => {
-  log(`MSuite CodeHandler listening on http://${config.host}:${config.port}`);
+  log(`====================================================`);
+  log(`  MSuite CodeHandler 2.0 (GitHub Private Proxy)     `);
+  log(`====================================================`);
+  log(`  Proxy API:    http://${config.host}:${config.port}/v1`);
+  log(`  Web UI:       http://${config.host}:${config.port}/`);
+  log(`  Admin Token:  ${config.adminToken}`);
+  if (config.adminTokenGenerated) {
+    log(`  [NOTE] Admin token was randomly generated for this session.`);
+    log(`         Set ADMIN_TOKEN in .env to persist your credentials.`);
+  }
+  log(`====================================================`);
 });
 
 const shutdown = (sig) => {
-  log(`${sig} received, shutting down`);
+  log(`${sig} received, shutting down gracefully...`);
   clients.unwatch();
   server.close(() => process.exit(0));
   setTimeout(() => process.exit(1), 10000).unref();
 };
+
 process.on('SIGINT', () => shutdown('SIGINT'));
 process.on('SIGTERM', () => shutdown('SIGTERM'));
