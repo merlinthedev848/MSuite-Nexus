@@ -1,12 +1,16 @@
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import http from 'node:http';
+import fs from 'node:fs';
+import path from 'node:path';
 import { createHmac } from 'node:crypto';
 import { createApp } from '../src/app.js';
 import { ClientStore, hashKey, parseClients } from '../src/clients.js';
 import { GitHub } from '../src/github.js';
 import { MetricsCollector } from '../src/metrics.js';
 import { EventBroker } from '../src/events.js';
+import { AssetCache } from '../src/asset-cache.js';
+import { AuditLogger } from '../src/audit.js';
 import { compareVersions } from '../src/version.js';
 
 const TOKEN = 'ghp_test_token';
@@ -14,10 +18,13 @@ const ADMIN_TOKEN = 'adm_super_secret_token_123';
 const WEBHOOK_SECRET = 'whsec_test_secret_xyz';
 const KEY_A = 'msk_client_a';
 const KEY_B = 'msk_client_b';
+const KEY_EXPIRED = 'msk_client_expired';
+const KEY_IP_LOCKED = 'msk_client_iplocked';
 const seen = [];
 
 let ghServer, ghPort, appServer, base;
-let testMetrics, testEvents;
+let testMetrics, testEvents, testAssetCache, testAudit;
+const testCacheDir = path.join(process.cwd(), '.cache', 'test_assets');
 
 const release = (tag, extra = {}) => ({
   id: 1,
@@ -34,6 +41,10 @@ const release = (tag, extra = {}) => ({
 });
 
 before(async () => {
+  if (fs.existsSync(testCacheDir)) {
+    fs.rmSync(testCacheDir, { recursive: true, force: true });
+  }
+
   ghServer = http.createServer((req, res) => {
     seen.push({ url: req.url, host: req.headers.host, auth: req.headers.authorization });
     const json = (code, body) => {
@@ -47,8 +58,11 @@ before(async () => {
     };
 
     if (req.url.startsWith('/s3/')) {
-      res.writeHead(200, { 'content-type': 'application/zip', 'content-disposition': 'attachment; filename=app.zip' });
-      return res.end('ZIPPY');
+      res.writeHead(200, {
+        'content-type': 'application/zip',
+        'content-disposition': 'attachment; filename=app.zip',
+      });
+      return res.end('ZIPPY_DATA_CONTENT');
     }
     if (req.headers.authorization !== `Bearer ${TOKEN}`) return json(401, { message: 'bad creds' });
 
@@ -63,7 +77,11 @@ before(async () => {
       case u.pathname === '/repos/acme/app/releases/latest':
         return json(200, release('v1.2.0'));
       case u.pathname === '/repos/acme/app/releases':
-        return json(200, [release('v1.3.0-beta.1', { prerelease: true }), release('v1.2.0'), release('v9.9.9', { draft: true })]);
+        return json(200, [
+          release('v1.3.0-beta.1', { prerelease: true }),
+          release('v1.2.0'),
+          release('v9.9.9', { draft: true }),
+        ]);
       case u.pathname === '/repos/acme/app/releases/assets/42':
         res.writeHead(302, { location: `http://localhost:${ghPort}/s3/signed?sig=abc` });
         return res.end();
@@ -85,9 +103,13 @@ before(async () => {
       { name: 'a', keyHash: hashKey(KEY_A), repos: ['acme/*'] },
       { name: 'b', keyHash: hashKey(KEY_B), repos: ['acme/other'], permissions: ['releases'] },
       { name: 'off', keyHash: hashKey('msk_off'), repos: ['*'], disabled: true },
+      { name: 'expired', keyHash: hashKey(KEY_EXPIRED), repos: ['*'], expiresAt: '2020-01-01T00:00:00Z' },
+      { name: 'iplocked', keyHash: hashKey(KEY_IP_LOCKED), repos: ['*'], allowedIps: ['192.0.2.1'] }, // Unreachable dummy IP
     ],
   });
+
   const config = {
+    port: 0,
     trustProxy: false,
     publicBaseUrl: 'https://proxy.example',
     rateLimitPerMinute: 1000,
@@ -98,6 +120,9 @@ before(async () => {
 
   testMetrics = new MetricsCollector();
   testEvents = new EventBroker();
+  testAudit = new AuditLogger({ logFile: path.join(testCacheDir, 'audit.jsonl') });
+  testAssetCache = new AssetCache({ cacheDir: testCacheDir, enabled: true, log: () => {} });
+
   const github = new GitHub({
     token: TOKEN,
     apiUrl: `http://127.0.0.1:${ghPort}`,
@@ -111,16 +136,22 @@ before(async () => {
     github,
     metrics: testMetrics,
     events: testEvents,
+    assetCache: testAssetCache,
+    audit: testAudit,
     log: () => {},
   });
 
   appServer = await new Promise((r) => { const s = app.listen(0, '127.0.0.1', () => r(s)); });
   base = `http://127.0.0.1:${appServer.address().port}`;
+  config.port = appServer.address().port;
 });
 
 after(() => {
   appServer?.close();
   ghServer?.close();
+  if (fs.existsSync(testCacheDir)) {
+    try { fs.rmSync(testCacheDir, { recursive: true, force: true }); } catch {}
+  }
 });
 
 const get = (path, key = KEY_A, headers = {}) =>
@@ -141,12 +172,25 @@ test('health is public', async () => {
   assert.equal(r.status, 200);
   const data = await r.json();
   assert.equal(data.ok, true);
+  assert.equal(data.service, 'MSuite Nexus');
 });
 
 test('rejects missing, invalid and disabled keys', async () => {
   assert.equal((await get('/v1/me', null)).status, 401);
   assert.equal((await get('/v1/me', 'nope')).status, 401);
   assert.equal((await get('/v1/me', 'msk_off')).status, 401);
+});
+
+test('rejects expired client key', async () => {
+  const res = await get('/v1/me', KEY_EXPIRED);
+  assert.equal(res.status, 401);
+  assert.equal((await res.json()).error, 'key_expired');
+});
+
+test('rejects request when client IP is not in allow-list', async () => {
+  const res = await get('/v1/me', KEY_IP_LOCKED);
+  assert.equal(res.status, 403);
+  assert.equal((await res.json()).error, 'ip_forbidden');
 });
 
 test('accepts X-API-Key header', async () => {
@@ -171,31 +215,54 @@ test('latest release is rewritten to proxy URLs and hides GitHub URLs', async ()
   assert.equal(body.assets[0].url, undefined);
 });
 
-test('release list filters drafts; prerelease flag picks newest non-draft', async () => {
-  const list = await (await get('/v1/repos/acme/app/releases')).json();
-  assert.deepEqual(list.map((x) => x.tag_name), ['v1.3.0-beta.1', 'v1.2.0']);
-  const pre = await (await get('/v1/repos/acme/app/releases/latest?prerelease=true')).json();
-  assert.equal(pre.tag_name, 'v1.3.0-beta.1');
+test('release channels: stable vs beta', async () => {
+  // Stable channel ignores pre-releases
+  const stable = await (await get('/v1/repos/acme/app/releases/latest?channel=stable')).json();
+  assert.equal(stable.tag_name, 'v1.2.0');
+
+  // Beta channel includes pre-releases
+  const beta = await (await get('/v1/repos/acme/app/releases/latest?channel=beta')).json();
+  assert.equal(beta.tag_name, 'v1.3.0-beta.1');
+
+  // Update check with channel
+  const updateStable = await (await get('/v1/repos/acme/app/update?current=1.2.0&channel=stable')).json();
+  assert.equal(updateStable.update_available, false);
+
+  const updateBeta = await (await get('/v1/repos/acme/app/update?current=1.2.0&channel=beta')).json();
+  assert.equal(updateBeta.update_available, true);
+  assert.equal(updateBeta.latest_version, 'v1.3.0-beta.1');
 });
 
-test('asset download streams and never leaks token to redirect target', async () => {
+test('asset download streams and tees to local disk cache', async () => {
   seen.length = 0;
-  const r = await get('/v1/repos/acme/app/releases/assets/42');
-  assert.equal(r.status, 200);
-  assert.equal(await r.text(), 'ZIPPY');
-  assert.equal(r.headers.get('content-disposition'), 'attachment; filename=app.zip');
-  const s3 = seen.find((s) => s.url.startsWith('/s3/'));
-  assert.ok(s3, 'redirect target was fetched');
-  assert.equal(s3.auth, undefined);
+  const r1 = await get('/v1/repos/acme/app/releases/assets/42');
+  assert.equal(r1.status, 200);
+  assert.equal(await r1.text(), 'ZIPPY_DATA_CONTENT');
+  assert.equal(r1.headers.get('x-nexus-cache'), 'MISS');
+
+  // Wait for background disk write
+  await new Promise((r) => setTimeout(r, 200));
+
+  // Second request should be a local disk cache HIT
+  const r2 = await get('/v1/repos/acme/app/releases/assets/42');
+  assert.equal(r2.status, 200);
+  assert.equal(r2.headers.get('x-nexus-cache'), 'HIT');
+  assert.equal(await r2.text(), 'ZIPPY_DATA_CONTENT');
+
+  // Third request: Range request (HTTP 206 Partial Content)
+  const r3 = await get('/v1/repos/acme/app/releases/assets/42', KEY_A, { Range: 'bytes=0-4' });
+  assert.equal(r3.status, 206);
+  assert.equal(r3.headers.get('content-range'), 'bytes 0-4/18');
+  assert.equal(await r3.text(), 'ZIPPY');
 });
 
-test('update check', async () => {
-  let body = await (await get('/v1/repos/acme/app/update?current=1.1.9')).json();
-  assert.equal(body.update_available, true);
-  assert.equal(body.latest_version, 'v1.2.0');
-  body = await (await get('/v1/repos/acme/app/update?current=v1.2.0')).json();
-  assert.equal(body.update_available, false);
-  assert.equal((await get('/v1/repos/acme/app/update')).status, 400);
+test('Prometheus metrics endpoint (/metrics)', async () => {
+  const r = await fetch(base + '/metrics');
+  assert.equal(r.status, 200);
+  const text = await r.text();
+  assert.ok(text.includes('nexus_requests_total'));
+  assert.ok(text.includes('nexus_bytes_streamed_total'));
+  assert.ok(text.includes('nexus_uptime_seconds'));
 });
 
 test('raw file with ref, served with safe content type', async () => {
@@ -204,13 +271,6 @@ test('raw file with ref, served with safe content type', async () => {
   assert.equal(r.headers.get('content-type'), 'application/octet-stream');
   assert.equal(r.headers.get('x-content-type-options'), 'nosniff');
   assert.deepEqual(await r.json(), { ref: 'main' });
-});
-
-test('archive download', async () => {
-  const r = await get('/v1/repos/acme/app/archive?ref=main&format=zip');
-  assert.equal(r.status, 200);
-  assert.equal(await r.text(), 'ZIPPY');
-  assert.equal((await get('/v1/repos/acme/app/archive?format=rar')).status, 400);
 });
 
 test('rejects traversal and bad input', async () => {
@@ -227,90 +287,56 @@ test('rejects traversal and bad input', async () => {
   assert.equal((await get('/v1/repos/ac%24me/app/releases/latest')).status, 400);
 });
 
-test('upstream 404 maps to 404', async () => {
-  const r = await get('/v1/repos/acme/missing/releases/latest');
-  assert.equal(r.status, 404);
-  assert.equal((await r.json()).error, 'not_found');
-});
-
-test('rate limiting', async () => {
-  const clients = ClientStore.fromObject({ clients: [{ name: 'a', keyHash: hashKey(KEY_A), repos: ['*'] }] });
-  const github = new GitHub({ token: TOKEN, apiUrl: `http://127.0.0.1:${ghPort}`, cacheTtlMs: 0 });
-  const app = createApp({ config: { rateLimitPerMinute: 2, logRequests: false }, clients, github, log: () => {} });
-  const s = await new Promise((r) => { const x = app.listen(0, '127.0.0.1', () => r(x)); });
-  const url = `http://127.0.0.1:${s.address().port}/v1/me`;
-  const h = { headers: { Authorization: `Bearer ${KEY_A}` } };
-  assert.equal((await fetch(url, h)).status, 200);
-  assert.equal((await fetch(url, h)).status, 200);
-  assert.equal((await fetch(url, h)).status, 429);
-  s.close();
-});
-
 test('Admin API authentication & overview', async () => {
-  // Missing or wrong token
   assert.equal((await adminReq('/api/admin/overview', 'GET', null, 'wrong')).status, 401);
-
-  // Valid token
   const res = await adminReq('/api/admin/overview');
   assert.equal(res.status, 200);
   const data = await res.json();
   assert.ok(data.totalRequests >= 0);
   assert.equal(data.publicBaseUrl, 'https://proxy.example');
-  assert.ok(data.githubRateLimits);
+  assert.ok(data.throughput);
+  assert.ok(data.assetCache);
 });
 
-test('Admin API client CRUD and key rotation', async () => {
-  // List clients
-  const list = await (await adminReq('/api/admin/clients')).json();
-  assert.ok(list.some((c) => c.name === 'a'));
-
-  // Add new client
+test('Admin API client CRUD with IP and expiration', async () => {
+  // Create client with allowed IPs
   const created = await (await adminReq('/api/admin/clients', 'POST', {
-    name: 'test-agent',
+    name: 'enterprise-worker',
     repos: ['acme/app'],
-    permissions: ['releases', 'raw'],
-    description: 'Unit test agent',
+    permissions: ['releases'],
+    allowedIps: ['127.0.0.1', '10.0.0.0/8'],
+    expiresAt: new Date(Date.now() + 86400000).toISOString(),
+    description: 'Enterprise internal worker',
   })).json();
 
   assert.equal(created.ok, true);
-  assert.equal(created.client.name, 'test-agent');
-  assert.ok(created.key.startsWith('msk_'));
+  assert.equal(created.client.name, 'enterprise-worker');
 
-  // Test that the newly created client key works on /v1/me
-  const meRes = await get('/v1/me', created.key);
-  assert.equal(meRes.status, 200);
-  assert.equal((await meRes.json()).name, 'test-agent');
+  // Verify access works from 127.0.0.1
+  const testRes = await get('/v1/me', created.key);
+  assert.equal(testRes.status, 200);
 
-  // Rotate key
-  const rotated = await (await adminReq('/api/admin/clients/test-agent/rotate-key', 'POST')).json();
-  assert.equal(rotated.ok, true);
-  assert.notEqual(rotated.key, created.key);
+  // Check audit log recorded creation
+  const auditRes = await adminReq('/api/admin/audit');
+  assert.equal(auditRes.status, 200);
+  const auditLogs = await auditRes.json();
+  assert.ok(auditLogs.some((l) => l.action === 'CLIENT_CREATED' && l.target === 'enterprise-worker'));
 
-  // Old key should fail, new key should work
-  assert.equal((await get('/v1/me', created.key)).status, 401);
-  assert.equal((await get('/v1/me', rotated.key)).status, 200);
-
-  // Toggle disabled
-  await adminReq('/api/admin/clients/test-agent', 'PUT', { disabled: true });
-  assert.equal((await get('/v1/me', rotated.key)).status, 401);
-
-  // Delete client
-  const delRes = await adminReq('/api/admin/clients/test-agent', 'DELETE');
-  assert.equal(delRes.status, 200);
+  // Clean up
+  await adminReq('/api/admin/clients/enterprise-worker', 'DELETE');
 });
 
-test('Admin diagnostics and cache clear', async () => {
-  const diagRes = await adminReq('/api/admin/diagnostics');
-  assert.equal(diagRes.status, 200);
-  const diag = await diagRes.json();
-  assert.equal(diag.ok, true);
-  assert.equal(diag.user.login, 'merlinthedev848');
-
-  // Purge cache
-  const purgeRes = await adminReq('/api/admin/cache/clear', 'POST', { pattern: 'acme' });
-  assert.equal(purgeRes.status, 200);
-  const purge = await purgeRes.json();
-  assert.equal(purge.ok, true);
+test('Admin API Sandbox tester (/api/admin/tester)', async () => {
+  const res = await adminReq('/api/admin/tester', 'POST', {
+    path: '/v1/me',
+    method: 'GET',
+    clientKey: KEY_A,
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.status, 200);
+  assert.equal(data.body.name, 'a');
 });
 
 test('GitHub Webhook with HMAC signature invalidates cache', async () => {

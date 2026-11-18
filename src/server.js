@@ -3,6 +3,8 @@ import { ClientStore } from './clients.js';
 import { GitHub } from './github.js';
 import { MetricsCollector } from './metrics.js';
 import { EventBroker } from './events.js';
+import { AssetCache } from './asset-cache.js';
+import { AuditLogger } from './audit.js';
 import { createApp } from './app.js';
 
 const log = (msg) => console.log(msg);
@@ -26,6 +28,13 @@ clients.watch(log);
 
 const metrics = new MetricsCollector();
 const events = new EventBroker();
+const audit = new AuditLogger({ logFile: config.auditLogFile });
+const assetCache = new AssetCache({
+  cacheDir: config.assetCacheDir,
+  maxBytes: config.assetCacheMaxBytes,
+  enabled: config.assetCacheEnabled,
+  log,
+});
 
 const github = new GitHub({
   tokens: config.githubTokens,
@@ -35,7 +44,16 @@ const github = new GitHub({
   metrics,
 });
 
-const app = createApp({ config, clients, github, metrics, events, log });
+const app = createApp({
+  config,
+  clients,
+  github,
+  metrics,
+  events,
+  assetCache,
+  audit,
+  log,
+});
 
 const server = app.listen(config.port, config.host, () => {
   log(`====================================================`);
@@ -43,6 +61,8 @@ const server = app.listen(config.port, config.host, () => {
   log(`====================================================`);
   log(`  Proxy API:    http://${config.host}:${config.port}/v1`);
   log(`  Web UI:       http://${config.host}:${config.port}/`);
+  log(`  Prometheus:   http://${config.host}:${config.port}/metrics`);
+  log(`  Asset Cache:  ${config.assetCacheEnabled ? 'Enabled (' + Math.round(config.assetCacheMaxBytes / (1024 * 1024 * 1024)) + 'GB)' : 'Disabled'}`);
   log(`  Admin Token:  ${config.adminToken}`);
   if (config.adminTokenGenerated) {
     log(`  [NOTE] Admin token was randomly generated for this session.`);

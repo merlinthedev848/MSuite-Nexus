@@ -68,9 +68,6 @@ body.dark-theme {
 
 .logo-icon {
   font-size: 1.5rem;
-  background: linear-gradient(135deg, #0ea5e9, #6366f1);
-  -webkit-background-clip: text;
-  -webkit-text-fill-color: transparent;
 }
 
 .brand-titles {
@@ -116,6 +113,12 @@ body.dark-theme {
   box-shadow: 0 0 8px rgba(16, 185, 129, 0.6);
 }
 
+.nav-center {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
 .gh-rate-pill {
   display: inline-flex;
   align-items: center;
@@ -136,6 +139,33 @@ body.dark-theme {
 .gh-reset {
   color: var(--text-muted);
   font-size: 0.75rem;
+}
+
+.nav-link-pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.35rem 0.7rem;
+  background-color: #0d1627;
+  border: 1px solid #1e293b;
+  border-radius: 6px;
+  color: var(--text-secondary);
+  font-size: 0.75rem;
+  font-family: var(--font-mono);
+  text-decoration: none;
+  transition: all 0.2s;
+}
+
+.nav-link-pill:hover {
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.pill-dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background-color: #10b981;
 }
 
 .auth-pill {
@@ -278,6 +308,22 @@ body.dark-theme {
 .tag-4xx { background: rgba(245, 158, 11, 0.15); color: #fbbf24; }
 .tag-5xx { background: rgba(239, 68, 68, 0.15); color: #f87171; }
 
+/* SPARKLINE */
+.sparkline-wrapper {
+  background-color: #070b14;
+  border: 1px solid #141e30;
+  border-radius: 6px;
+  padding: 0.5rem;
+  height: 120px;
+  display: flex;
+  align-items: center;
+}
+
+.sparkline-wrapper canvas {
+  width: 100%;
+  height: 100%;
+}
+
 .overview-details-grid {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(420px, 1fr));
@@ -389,6 +435,12 @@ body.dark-theme {
   border-color: var(--primary);
   color: var(--text-main);
   background-color: rgba(56, 189, 248, 0.08);
+}
+
+.btn-outline.active {
+  background-color: #0284c7;
+  color: #fff;
+  border-color: #0284c7;
 }
 
 .btn-ghost {
@@ -637,9 +689,68 @@ body.dark-theme {
 }
 
 .asset-table td {
-  padding: 0.45rem 0.5rem;
+  padding: 0.55rem 0.5rem;
   font-size: 0.8rem;
   border-bottom: 1px solid #151f33;
+}
+
+.cached-indicator {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.25rem;
+  color: #34d399;
+  font-weight: 600;
+  font-size: 0.75rem;
+}
+
+/* SANDBOX */
+.sandbox-controls-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1rem;
+}
+
+.sandbox-controls-grid .full-width {
+  grid-column: 1 / -1;
+}
+
+.sandbox-url-row {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.sandbox-url-row input {
+  flex: 1;
+}
+
+.method-select {
+  background-color: #0b1120;
+  border: 1px solid var(--border-color);
+  color: #38bdf8;
+  font-weight: 700;
+  padding: 0.55rem 0.75rem;
+  border-radius: 6px;
+  font-size: 0.85rem;
+}
+
+.sandbox-result-card {
+  margin-top: 1.5rem;
+}
+
+.sandbox-response-view {
+  background-color: #050811;
+  border: 1px solid #151e32;
+  border-radius: 6px;
+  padding: 1rem;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.sandbox-response-view pre {
+  margin: 0;
+  font-family: var(--font-mono);
+  font-size: 0.8rem;
+  color: #e2e8f0;
 }
 
 /* TERMINAL / LIVE LOGS */
@@ -776,7 +887,7 @@ body.dark-theme {
 }
 
 /* FORMS & INPUTS */
-input[type="text"], input[type="password"] {
+input[type="text"], input[type="password"], select.form-input {
   background-color: #0b1120;
   border: 1px solid var(--border-color);
   color: #fff;
@@ -784,10 +895,11 @@ input[type="text"], input[type="password"] {
   border-radius: 6px;
   font-size: 0.85rem;
   outline: none;
+  width: 100%;
   transition: border-color 0.2s;
 }
 
-input[type="text"]:focus, input[type="password"]:focus {
+input[type="text"]:focus, input[type="password"]:focus, select.form-input:focus {
   border-color: var(--border-focus);
 }
 
@@ -849,7 +961,7 @@ input[type="text"]:focus, input[type="password"]:focus {
   border: 1px solid #1e293b;
   border-radius: 10px;
   width: 90%;
-  max-width: 520px;
+  max-width: 540px;
   box-shadow: 0 20px 25px -5px rgba(0, 0, 0, 0.5);
   overflow: hidden;
 }
@@ -950,6 +1062,7 @@ input[type="text"]:focus, input[type="password"]:focus {
 .text-sm { font-size: 0.85rem; }
 .text-xs { font-size: 0.75rem; }
 .mt-3 { margin-top: 0.75rem; }
+.mb-4 { margin-bottom: 1.5rem; }
 .p-2 { padding: 0.5rem; }
 .p-4 { padding: 1rem; }
 .hidden { display: none !important; }

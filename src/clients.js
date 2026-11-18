@@ -7,12 +7,49 @@ export const PERMISSIONS = ['releases', 'raw', 'archive'];
 export const hashKey = (key) => createHash('sha256').update(String(key), 'utf8').digest('hex');
 export const generateKey = () => 'msk_' + randomBytes(32).toString('base64url');
 
+function ipv4ToInt(ip) {
+  return ip.split('.').reduce((acc, octet) => ((acc << 8) + parseInt(octet, 10)) >>> 0, 0);
+}
+
+function matchCidr(ip, cidr) {
+  try {
+    const cleanIp = ip.replace(/^::ffff:/, '');
+    if (cidr === '*' || cidr === cleanIp) return true;
+    if (!cidr.includes('/')) return cleanIp === cidr;
+
+    const [subnet, bitsStr] = cidr.split('/');
+    const bits = parseInt(bitsStr, 10);
+    if (isNaN(bits) || bits < 0 || bits > 32) return false;
+
+    const ipInt = ipv4ToInt(cleanIp);
+    const subnetInt = ipv4ToInt(subnet);
+    const mask = bits === 0 ? 0 : (~0 << (32 - bits)) >>> 0;
+
+    return (ipInt & mask) === (subnetInt & mask);
+  } catch {
+    return false;
+  }
+}
+
+export function isIpAllowed(client, ip) {
+  if (!client.allowedIps || !client.allowedIps.length) return true;
+  if (client.allowedIps.includes('*')) return true;
+  if (!ip) return false;
+  return client.allowedIps.some((rule) => matchCidr(ip, rule));
+}
+
+export function isClientExpired(client) {
+  if (!client.expiresAt) return false;
+  return new Date(client.expiresAt).getTime() <= Date.now();
+}
+
 /**
  * clients.json format:
  * {
  *   "clients": [
  *     { "name": "msuite-sip", "keyHash": "<sha256 hex>", "repos": ["owner/repo", "owner/*"],
- *       "permissions": ["releases", "raw", "archive"], "disabled": false }
+ *       "permissions": ["releases", "raw", "archive"], "disabled": false,
+ *       "allowedIps": ["10.0.0.0/8", "127.0.0.1"], "expiresAt": "2027-01-01T00:00:00Z" }
  *   ]
  * }
  */
@@ -43,6 +80,8 @@ export function parseClients(data) {
       keyHash: c.keyHash.toLowerCase(),
       createdAt: c.createdAt || null,
       description: c.description || '',
+      allowedIps: Array.isArray(c.allowedIps) ? c.allowedIps : ['*'],
+      expiresAt: c.expiresAt || null,
     };
 
     byName.set(c.name.toLowerCase(), clientObj);
@@ -90,6 +129,8 @@ export class ClientStore {
       repos: c.repos,
       permissions: Array.from(c.permissions),
       disabled: c.disabled,
+      allowedIps: c.allowedIps,
+      expiresAt: c.expiresAt,
       createdAt: c.createdAt || new Date().toISOString(),
     }));
 
@@ -128,6 +169,9 @@ export class ClientStore {
       repos: c.repos,
       permissions: Array.from(c.permissions),
       disabled: c.disabled,
+      allowedIps: c.allowedIps,
+      expiresAt: c.expiresAt,
+      isExpired: isClientExpired(c),
       keyMasked: c.keyHash.slice(0, 8) + '...' + c.keyHash.slice(-8),
       createdAt: c.createdAt,
     }));
@@ -137,7 +181,14 @@ export class ClientStore {
     return this.byName.get(name.toLowerCase()) || null;
   }
 
-  addClient({ name, repos = ['*'], permissions = PERMISSIONS, description = '' }) {
+  addClient({
+    name,
+    repos = ['*'],
+    permissions = PERMISSIONS,
+    description = '',
+    allowedIps = ['*'],
+    expiresAt = null,
+  }) {
     if (!name || typeof name !== 'string') throw new Error('Client name is required');
     if (this.byName.has(name.toLowerCase())) throw new Error(`Client "${name}" already exists`);
 
@@ -154,6 +205,8 @@ export class ClientStore {
       repos: repos.map((r) => String(r).toLowerCase()),
       permissions: new Set(permissions),
       disabled: false,
+      allowedIps: Array.isArray(allowedIps) ? allowedIps : ['*'],
+      expiresAt: expiresAt || null,
       keyHash,
       createdAt: new Date().toISOString(),
     };
@@ -165,7 +218,7 @@ export class ClientStore {
     return { client: clientObj, key };
   }
 
-  updateClient(name, { repos, permissions, disabled, description }) {
+  updateClient(name, { repos, permissions, disabled, description, allowedIps, expiresAt }) {
     const client = this.getClient(name);
     if (!client) throw new Error(`Client "${name}" not found`);
 
@@ -180,6 +233,12 @@ export class ClientStore {
     }
     if (description !== undefined) {
       client.description = String(description);
+    }
+    if (allowedIps !== undefined) {
+      client.allowedIps = Array.isArray(allowedIps) ? allowedIps : ['*'];
+    }
+    if (expiresAt !== undefined) {
+      client.expiresAt = expiresAt || null;
     }
     if (disabled !== undefined) {
       client.disabled = Boolean(disabled);
@@ -198,7 +257,6 @@ export class ClientStore {
     const client = this.getClient(name);
     if (!client) throw new Error(`Client "${name}" not found`);
 
-    // Remove old hash mapping
     this.byHash.delete(client.keyHash);
 
     const key = generateKey();

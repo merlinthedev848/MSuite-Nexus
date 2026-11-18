@@ -1,9 +1,9 @@
 import express from 'express';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { Readable } from 'node:stream';
+import { Readable, PassThrough } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { canAccess } from './clients.js';
+import { canAccess, isIpAllowed, isClientExpired } from './clients.js';
 import { UpstreamError } from './github.js';
 import { compareVersions } from './version.js';
 import { createAdminRouter } from './admin.js';
@@ -44,7 +44,7 @@ function validRef(ref) {
     !ref.includes('..') && !/[\s~^:?*\[\\]/.test(ref) && !ref.startsWith('/') && !ref.endsWith('/');
 }
 
-export function createApp({ config, clients, github, metrics, events, log = console.log }) {
+export function createApp({ config, clients, github, metrics, events, assetCache = null, audit = null, log = console.log }) {
   const app = express();
   app.disable('x-powered-by');
   app.set('trust proxy', config.trustProxy);
@@ -64,12 +64,19 @@ export function createApp({ config, clients, github, metrics, events, log = cons
     next();
   });
 
-  // Regular body parsing for API endpoints
   app.use(express.json({ limit: '2mb' }));
 
   // Static files for the modern MSuite Admin UI
   const publicDir = path.join(__dirname, '..', 'public');
   app.use(express.static(publicDir, { maxAge: '1h', index: 'index.html' }));
+
+  // Prometheus Metrics endpoint
+  app.get('/metrics', (req, res) => {
+    const rateLimits = github.getRateLimits();
+    const assetStats = assetCache?.getStats();
+    res.type('text/plain; version=0.0.4; charset=utf-8');
+    res.send(metrics.toPrometheusText(rateLimits, assetStats));
+  });
 
   // --- security headers + telemetry logging ---
   app.use((req, res, next) => {
@@ -82,7 +89,6 @@ export function createApp({ config, clients, github, metrics, events, log = cons
     const start = Date.now();
     let bytesSent = 0;
 
-    // Intercept write / end to accurately track streaming byte counts
     const origWrite = res.write;
     const origEnd = res.end;
     res.write = function (chunk, ...args) {
@@ -97,8 +103,6 @@ export function createApp({ config, clients, github, metrics, events, log = cons
     res.on('finish', () => {
       const ms = Date.now() - start;
       const clientName = req.client?.name ?? null;
-
-      // Don't record internal static file requests to keep telemetry focused on API traffic
       const isApiTraffic = req.path.startsWith('/v1/') || req.path.startsWith('/api/');
 
       if (isApiTraffic && metrics) {
@@ -133,7 +137,12 @@ export function createApp({ config, clients, github, metrics, events, log = cons
   });
 
   // Liveness health check
-  app.get('/health', (req, res) => res.json({ ok: true, timestamp: new Date().toISOString() }));
+  app.get('/health', (req, res) => res.json({
+    ok: true,
+    service: 'MSuite Nexus',
+    version: '2.0.0',
+    timestamp: new Date().toISOString(),
+  }));
 
   // Mount GitHub Webhook receiver
   app.post('/v1/webhook', createWebhookHandler({
@@ -145,7 +154,7 @@ export function createApp({ config, clients, github, metrics, events, log = cons
 
   // Mount Admin API router
   if (metrics && events) {
-    app.use('/api/admin', createAdminRouter({ config, clients, github, metrics, events, log }));
+    app.use('/api/admin', createAdminRouter({ config, clients, github, metrics, events, assetCache, audit, log }));
   }
 
   // --- Client /v1 API ---
@@ -155,6 +164,17 @@ export function createApp({ config, clients, github, metrics, events, log = cons
   v1.use((req, res, next) => {
     const client = clients.authenticate(extractKey(req));
     if (!client) return next(new HttpError(401, 'unauthorized', 'Missing or invalid API key'));
+
+    // Check expiration
+    if (isClientExpired(client)) {
+      return next(new HttpError(401, 'key_expired', 'Client API key has expired'));
+    }
+
+    // Check IP allow-list
+    if (!isIpAllowed(client, req.ip)) {
+      return next(new HttpError(403, 'ip_forbidden', `IP address ${req.ip} is not permitted for this client key`));
+    }
+
     req.client = client;
 
     if (config.rateLimitPerMinute > 0) {
@@ -180,6 +200,8 @@ export function createApp({ config, clients, github, metrics, events, log = cons
       name: req.client.name,
       repos: req.client.repos,
       permissions: [...req.client.permissions],
+      allowedIps: req.client.allowedIps,
+      expiresAt: req.client.expiresAt,
     });
   });
 
@@ -218,12 +240,20 @@ export function createApp({ config, clients, github, metrics, events, log = cons
 
   const repoPath = (req) => `/repos/${enc(req.params.owner)}/${enc(req.params.repo)}`;
 
-  const latestRelease = async (req, includePrerelease) => {
-    if (!includePrerelease) return github.json(`${repoPath(req)}/releases/latest`);
+  const findReleaseForChannel = async (req, channel = 'stable') => {
     const list = await github.json(`${repoPath(req)}/releases?per_page=30`);
-    const rel = list.find((r) => !r.draft);
-    if (!rel) throw new UpstreamError(404, 'no releases');
-    return rel;
+    const valid = list.filter((r) => !r.draft);
+
+    if (channel === 'stable') {
+      const stable = valid.find((r) => !r.prerelease && !/-alpha|-beta|-rc/i.test(r.tag_name));
+      if (!stable) throw new UpstreamError(404, 'no stable release found');
+      return stable;
+    }
+
+    // channel === 'beta' or 'canary' returns newest published release
+    const newest = valid[0];
+    if (!newest) throw new UpstreamError(404, 'no releases found');
+    return newest;
   };
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
@@ -237,7 +267,8 @@ export function createApp({ config, clients, github, metrics, events, log = cons
 
   // Latest release
   v1.get('/repos/:owner/:repo/releases/latest', repoGuard('releases'), wrap(async (req, res) => {
-    const rel = await latestRelease(req, req.query.prerelease === 'true');
+    const channel = req.query.channel || (req.query.prerelease === 'true' ? 'beta' : 'stable');
+    const rel = await findReleaseForChannel(req, channel);
     res.json(mapRelease(req, rel));
   }));
 
@@ -249,24 +280,70 @@ export function createApp({ config, clients, github, metrics, events, log = cons
     res.json(mapRelease(req, rel));
   }));
 
-  // Download release asset
+  // Download release asset (with local disk cache & Range acceleration)
   v1.get('/repos/:owner/:repo/releases/assets/:id', repoGuard('releases'), wrap(async (req, res) => {
-    if (!/^\d{1,20}$/.test(req.params.id)) throw new HttpError(400, 'bad_request', 'Invalid asset id');
-    const upstream = await github.stream(`${repoPath(req)}/releases/assets/${req.params.id}`, {
+    const assetId = req.params.id;
+    if (!/^\d{1,20}$/.test(assetId)) throw new HttpError(400, 'bad_request', 'Invalid asset id');
+
+    // 1. Check if asset is cached on disk
+    if (assetCache && assetCache.has(assetId)) {
+      await assetCache.serveCached(assetId, req, res);
+      return;
+    }
+
+    // 2. Fetch from upstream GitHub
+    const upstream = await github.stream(`${repoPath(req)}/releases/assets/${assetId}`, {
       accept: 'application/octet-stream',
       range: req.get('range'),
     });
-    await pipeUpstream(upstream, res);
+
+    // Extract headers
+    res.status(upstream.status);
+    for (const h of PASSTHROUGH_HEADERS) {
+      const v = upstream.headers.get(h);
+      if (v) res.set(h, v);
+    }
+    res.set('X-Nexus-Cache', 'MISS');
+
+    if (!upstream.body) return res.end();
+
+    const upstreamStream = Readable.fromWeb(upstream.body);
+
+    // If cache enabled and response is full 200, tee stream to disk cache while piping to client
+    if (assetCache?.enabled && upstream.status === 200) {
+      const tee1 = new PassThrough();
+      const tee2 = new PassThrough();
+
+      upstreamStream.pipe(tee1);
+      upstreamStream.pipe(tee2);
+
+      const meta = {
+        name: req.params.repo,
+        contentType: upstream.headers.get('content-type') || 'application/octet-stream',
+        contentDisposition: upstream.headers.get('content-disposition') || '',
+        etag: upstream.headers.get('etag') || '',
+      };
+
+      // Background cache write
+      assetCache.cacheAssetStream(assetId, tee2, meta).catch((e) => log(`Cache error: ${e.message}`));
+      await pipeline(tee1, res);
+    } else {
+      await pipeline(upstreamStream, res);
+    }
   }));
 
-  // Update check: /update?current=1.2.3[&prerelease=true]
+  // Update check with channels: /update?current=1.2.3[&channel=stable|beta]
   v1.get('/repos/:owner/:repo/update', repoGuard('releases'), wrap(async (req, res) => {
     const current = String(req.query.current || '').trim();
     if (!current) throw new HttpError(400, 'bad_request', 'Query parameter "current" is required');
-    const rel = await latestRelease(req, req.query.prerelease === 'true');
+
+    const channel = req.query.channel || (req.query.prerelease === 'true' ? 'beta' : 'stable');
+    const rel = await findReleaseForChannel(req, channel);
     const latest = mapRelease(req, rel);
+
     res.json({
       current,
+      channel,
       latest_version: rel.tag_name,
       update_available: compareVersions(rel.tag_name, current) > 0,
       release: latest,

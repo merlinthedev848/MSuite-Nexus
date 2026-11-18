@@ -1,4 +1,5 @@
 import { randomBytes } from 'node:crypto';
+import path from 'node:path';
 
 export function loadConfig(env = process.env) {
   const num = (v, d) => {
@@ -8,7 +9,6 @@ export function loadConfig(env = process.env) {
     return n;
   };
 
-  // Support single token or comma-separated pool: GITHUB_TOKENS or GITHUB_TOKEN
   const rawTokens = env.GITHUB_TOKENS || env.GITHUB_TOKEN || '';
   const githubTokens = rawTokens
     .split(',')
@@ -30,13 +30,20 @@ export function loadConfig(env = process.env) {
     publicBaseUrl: (env.PUBLIC_BASE_URL || '').replace(/\/+$/, ''),
     trustProxy: env.TRUST_PROXY === 'true' || env.TRUST_PROXY === '1',
     logRequests: env.LOG_REQUESTS !== 'false',
+
+    // Asset disk cache
+    assetCacheEnabled: env.ASSET_CACHE_ENABLED !== 'false',
+    assetCacheDir: env.ASSET_CACHE_DIR || path.join(process.cwd(), '.cache', 'assets'),
+    assetCacheMaxBytes: num(env.ASSET_CACHE_MAX_GB, 10) * 1024 * 1024 * 1024,
+
+    // Audit log
+    auditLogFile: env.AUDIT_LOG_FILE || path.join(process.cwd(), '.cache', 'audit.jsonl'),
   };
 
   if (!cfg.githubTokens.length) {
     throw new Error('GITHUB_TOKEN (or GITHUB_TOKENS) is required');
   }
 
-  // If no admin token provided, generate a secure random one
   if (!cfg.adminToken) {
     cfg.adminToken = 'msuite_adm_' + randomBytes(24).toString('base64url');
     cfg.adminTokenGenerated = true;

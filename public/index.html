@@ -32,6 +32,9 @@
           <span class="gh-value" id="ghRateRemaining">--</span>
           <span class="gh-reset" id="ghRateReset"></span>
         </div>
+        <a href="/metrics" target="_blank" class="nav-link-pill" title="Prometheus Metrics Endpoint">
+          <span class="pill-dot"></span> /metrics
+        </a>
       </div>
 
       <div class="nav-actions">
@@ -53,9 +56,15 @@
       <button class="tab-btn" data-tab="explorer">
         <span class="tab-icon">📦</span> Repository Explorer
       </button>
+      <button class="tab-btn" data-tab="sandbox">
+        <span class="tab-icon">🧪</span> API Sandbox
+      </button>
       <button class="tab-btn" data-tab="live-logs">
         <span class="tab-icon">📡</span> Live Traffic Stream
         <span class="badge-counter" id="logCounter">0</span>
+      </button>
+      <button class="tab-btn" data-tab="audit">
+        <span class="tab-icon">🛡️</span> Audit Trail
       </button>
       <button class="tab-btn" data-tab="diagnostics">
         <span class="tab-icon">🛠️</span> Diagnostics &amp; Cache
@@ -87,7 +96,7 @@
               <span class="stat-icon">💾</span>
             </div>
             <div class="stat-value" id="statBytesStreamed">0 MB</div>
-            <div class="stat-sub">Direct binary streaming</div>
+            <div class="stat-sub" id="statAssetSavedSub">0 MB saved by disk cache</div>
           </div>
 
           <div class="card stat-card">
@@ -127,6 +136,20 @@
           </div>
         </div>
 
+        <!-- Live Throughput Sparkline Card -->
+        <div class="card mb-4">
+          <div class="card-header">
+            <div>
+              <h3>Request Volume (Last 15 Minutes)</h3>
+              <p class="text-secondary text-xs">Real-time throughput rolling request timeline</p>
+            </div>
+            <span class="badge" id="currentThroughputBadge">0 req/min</span>
+          </div>
+          <div class="sparkline-wrapper">
+            <canvas id="throughputCanvas" width="1200" height="120"></canvas>
+          </div>
+        </div>
+
         <div class="overview-details-grid">
           <!-- Quick Integration Guide -->
           <div class="card">
@@ -135,13 +158,13 @@
               <span class="badge">v1 API</span>
             </div>
             <p class="text-secondary text-sm">
-              MSuite apps call this proxy using per-app API keys. The proxy holds the GitHub credential and serves private assets, updates, and files.
+              MSuite apps call Nexus using per-app API keys. Nexus securely holds GitHub tokens and distributes private assets, updates, and files.
             </p>
             <div class="endpoint-list">
               <div class="endpoint-item">
                 <span class="method get">GET</span>
-                <code>/v1/repos/{owner}/{repo}/update?current=1.2.0</code>
-                <span class="endpoint-desc">Check for updates</span>
+                <code>/v1/repos/{owner}/{repo}/update?current=1.2.0&amp;channel=stable</code>
+                <span class="endpoint-desc">Channel updates</span>
               </div>
               <div class="endpoint-item">
                 <span class="method get">GET</span>
@@ -151,7 +174,7 @@
               <div class="endpoint-item">
                 <span class="method get">GET</span>
                 <code>/v1/repos/{owner}/{repo}/releases/assets/{id}</code>
-                <span class="endpoint-desc">Stream release binary</span>
+                <span class="endpoint-desc">Cached binary stream</span>
               </div>
               <div class="endpoint-item">
                 <span class="method get">GET</span>
@@ -164,7 +187,7 @@
           <!-- Top Client Apps -->
           <div class="card">
             <div class="card-header">
-              <h3>Top Client Applications</h3>
+              <h3>Client Fleet Activity</h3>
               <button class="btn-sm btn-outline" id="btnRefreshOverview">Refresh</button>
             </div>
             <div id="topClientsTableContainer">
@@ -190,7 +213,7 @@
       <section id="tab-clients" class="tab-content">
         <div class="tab-action-bar">
           <div class="search-bar">
-            <input type="text" id="clientSearchInput" placeholder="Filter clients by name or repo...">
+            <input type="text" id="clientSearchInput" placeholder="Filter clients by name, repo, or IP...">
           </div>
           <button class="btn btn-primary" id="btnOpenAddClientModal">
             <span>+</span> New Client Key
@@ -207,13 +230,15 @@
                   <th>Description</th>
                   <th>Allowed Repositories</th>
                   <th>Permissions</th>
+                  <th>IP Guard</th>
+                  <th>Expires</th>
                   <th>Requests</th>
                   <th>Last Seen</th>
                   <th class="text-right">Actions</th>
                 </tr>
               </thead>
               <tbody id="clientsTableBody">
-                <tr><td colspan="8" class="text-center text-muted">Loading clients...</td></tr>
+                <tr><td colspan="10" class="text-center text-muted">Loading clients...</td></tr>
               </tbody>
             </table>
           </div>
@@ -226,7 +251,7 @@
           <!-- Repo Selector Sidebar -->
           <div class="card explorer-sidebar">
             <div class="card-header">
-              <h3>Available Repositories</h3>
+              <h3>Repositories</h3>
               <button class="btn-icon" id="btnRefreshRepos" title="Refresh repositories">🔄</button>
             </div>
             <div class="repo-search-box">
@@ -242,7 +267,7 @@
             <div id="repoPlaceholder" class="empty-state">
               <span class="empty-icon">📂</span>
               <h3>Select a repository to explore</h3>
-              <p class="text-secondary">View releases, download assets, and generate copy-paste client code snippets.</p>
+              <p class="text-secondary">View releases, cache assets to local NVMe, and generate copy-paste client code snippets.</p>
             </div>
 
             <div id="repoDetails" class="hidden">
@@ -283,8 +308,13 @@
               <!-- Releases List -->
               <div class="releases-section">
                 <div class="releases-header">
-                  <h3>Releases &amp; Assets</h3>
-                  <button class="btn-sm btn-outline" id="btnRefreshReleases">Refresh</button>
+                  <h3>Releases &amp; Binary Assets</h3>
+                  <div class="channel-filter-group">
+                    <button class="btn-sm btn-outline active channel-filter-btn" data-channel="all">All</button>
+                    <button class="btn-sm btn-outline channel-filter-btn" data-channel="stable">Stable</button>
+                    <button class="btn-sm btn-outline channel-filter-btn" data-channel="beta">Beta / RC</button>
+                    <button class="btn-sm btn-outline" id="btnRefreshReleases">Refresh</button>
+                  </div>
                 </div>
                 <div id="releasesContainer">
                   <div class="text-center text-muted p-4">Loading releases...</div>
@@ -295,7 +325,61 @@
         </div>
       </section>
 
-      <!-- 4. LIVE LOGS TAB -->
+      <!-- 4. API SANDBOX TAB -->
+      <section id="tab-sandbox" class="tab-content">
+        <div class="card mb-4">
+          <div class="card-header">
+            <div>
+              <h3>Interactive API Request Sandbox</h3>
+              <p class="text-secondary text-sm">Test Nexus endpoints and client API key permissions directly in your browser.</p>
+            </div>
+          </div>
+          <div class="sandbox-controls-grid">
+            <div class="form-group">
+              <label class="form-label">Preset Endpoints:</label>
+              <select id="sandboxPresetSelect" class="form-input">
+                <option value="custom">-- Custom Request --</option>
+                <option value="me">Verify Client Authentication (/v1/me)</option>
+                <option value="update">Check Update (/v1/repos/{owner}/{repo}/update?current=1.0.0)</option>
+                <option value="latest">Latest Release (/v1/repos/{owner}/{repo}/releases/latest)</option>
+              </select>
+            </div>
+
+            <div class="form-group">
+              <label class="form-label">Authenticate As:</label>
+              <select id="sandboxClientSelect" class="form-input">
+                <option value="">(No API Key - Anonymous)</option>
+              </select>
+            </div>
+
+            <div class="form-group full-width">
+              <label class="form-label">Request Path:</label>
+              <div class="sandbox-url-row">
+                <select id="sandboxMethod" class="method-select">
+                  <option value="GET">GET</option>
+                  <option value="POST">POST</option>
+                </select>
+                <input type="text" id="sandboxPathInput" class="form-input" value="/v1/me" placeholder="/v1/repos/owner/repo/releases/latest">
+                <button class="btn btn-primary" id="btnExecuteSandbox">Execute Request</button>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="card sandbox-result-card hidden" id="sandboxResultCard">
+          <div class="card-header">
+            <div class="sandbox-result-title">
+              <span class="status-tag" id="sandboxStatusTag">200 OK</span>
+              <span class="text-sm text-muted" id="sandboxLatency">⏱️ 0 ms</span>
+            </div>
+          </div>
+          <div class="sandbox-response-view">
+            <pre><code id="sandboxResponseBody"></code></pre>
+          </div>
+        </div>
+      </section>
+
+      <!-- 5. LIVE LOGS TAB -->
       <section id="tab-live-logs" class="tab-content">
         <div class="tab-action-bar">
           <div class="log-controls">
@@ -333,7 +417,37 @@
         </div>
       </section>
 
-      <!-- 5. DIAGNOSTICS & CACHE TAB -->
+      <!-- 6. AUDIT TRAIL TAB -->
+      <section id="tab-audit" class="tab-content">
+        <div class="card">
+          <div class="card-header">
+            <div>
+              <h3>Security &amp; Administrative Audit Log</h3>
+              <p class="text-secondary text-sm">Immutable ledger of client key creations, revocations, and configuration changes.</p>
+            </div>
+            <button class="btn-sm btn-outline" id="btnRefreshAudit">Refresh Audit</button>
+          </div>
+          <div class="table-responsive">
+            <table class="data-table" id="auditTable">
+              <thead>
+                <tr>
+                  <th>Timestamp</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>IP Address</th>
+                  <th>Details</th>
+                </tr>
+              </thead>
+              <tbody id="auditTableBody">
+                <tr><td colspan="6" class="text-center text-muted">Loading audit entries...</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <!-- 7. DIAGNOSTICS & CACHE TAB -->
       <section id="tab-diagnostics" class="tab-content">
         <div class="diagnostics-grid">
           <!-- Upstream GitHub Diagnostics -->
@@ -348,20 +462,20 @@
             </div>
           </div>
 
-          <!-- In-Memory Cache Manager -->
+          <!-- Memory API Cache Manager -->
           <div class="card">
             <div class="card-header">
-              <h3>Memory Cache Management</h3>
-              <button class="btn btn-danger btn-sm" id="btnPurgeAllCache">Purge Entire Cache</button>
+              <h3>Memory API Cache</h3>
+              <button class="btn btn-danger btn-sm" id="btnPurgeAllCache">Purge Memory Cache</button>
             </div>
-            <p class="text-secondary text-sm">MSuite Nexus caches GitHub JSON endpoints and ETags in memory with automatic TTL expiration.</p>
+            <p class="text-secondary text-sm">Caches GitHub JSON endpoints and ETags in memory with automatic TTL expiration.</p>
             <div class="cache-stats-box" id="cacheStatsBox">
               <div class="cache-stat-item">
                 <span class="cache-stat-label">Cached Entries:</span>
                 <span class="cache-stat-val" id="cacheEntriesCount">0</span>
               </div>
               <div class="cache-stat-item">
-                <span class="cache-stat-label">Cache Hit Ratio:</span>
+                <span class="cache-stat-label">Hit Ratio:</span>
                 <span class="cache-stat-val" id="cacheHitRatioVal">100%</span>
               </div>
             </div>
@@ -371,6 +485,35 @@
             </div>
             <div class="cache-entries-list" id="cacheEntriesList">
               <div class="text-muted text-xs p-2">Cache is empty or not yet loaded</div>
+            </div>
+          </div>
+
+          <!-- Disk Binary Asset Cache Manager -->
+          <div class="card full-width-card">
+            <div class="card-header">
+              <div>
+                <h3>Local Disk Binary Asset Cache</h3>
+                <p class="text-secondary text-xs">Caches release binaries locally on server NVMe/SSD with HTTP 206 Partial Content (Range) acceleration.</p>
+              </div>
+              <div class="cache-stat-val" id="diskCacheBandwidthSaved">0 MB saved</div>
+            </div>
+            <div class="table-responsive mt-3">
+              <table class="data-table" id="assetCacheTable">
+                <thead>
+                  <tr>
+                    <th>Asset ID</th>
+                    <th>File Name</th>
+                    <th>Size</th>
+                    <th>Hits</th>
+                    <th>Cached Date</th>
+                    <th>Last Served</th>
+                    <th class="text-right">Action</th>
+                  </tr>
+                </thead>
+                <tbody id="assetCacheTableBody">
+                  <tr><td colspan="7" class="text-center text-muted">No release binaries cached on disk yet</td></tr>
+                </tbody>
+              </table>
             </div>
           </div>
 
@@ -432,6 +575,22 @@
             <label class="form-label" for="newClientRepos">Allowed Repositories *</label>
             <input type="text" id="newClientRepos" class="form-input" value="*" placeholder="owner/repo, owner/*, or *">
             <span class="form-hint">Comma-separated patterns. Example: <code>merlinthedev848/MSuite-SIP, merlinthedev848/*</code></span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newClientIps">Allowed IP / CIDR Subnets</label>
+            <input type="text" id="newClientIps" class="form-input" value="*" placeholder="* or 10.0.0.0/8, 192.168.1.100">
+            <span class="form-hint">Restrict key usage to specific company subnets or leave <code>*</code> for anywhere.</span>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newClientExpires">Key Expiration</label>
+            <select id="newClientExpires" class="form-input">
+              <option value="never">Never Expire</option>
+              <option value="30d">30 Days</option>
+              <option value="90d" selected>90 Days (Recommended)</option>
+              <option value="365d">1 Year</option>
+            </select>
           </div>
 
           <div class="form-group">

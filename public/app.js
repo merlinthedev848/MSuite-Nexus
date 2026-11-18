@@ -7,12 +7,14 @@ const state = {
   repos: [],
   selectedRepo: null,
   releases: [],
+  selectedChannel: 'all',
   logs: [],
   logCounter: 0,
   isLogPaused: false,
   autoScrollLogs: true,
   snippetLang: 'curl',
   eventSource: null,
+  assetStats: null,
 };
 
 // Utilities
@@ -127,16 +129,22 @@ function loadActiveTabData() {
     case 'explorer':
       loadRepos();
       break;
+    case 'sandbox':
+      populateSandboxClientSelect();
+      break;
     case 'live-logs':
-      // SSE keeps it updated
+      break;
+    case 'audit':
+      loadAuditLogs();
       break;
     case 'diagnostics':
       loadCacheStats();
+      loadAssetCacheStats();
       break;
   }
 }
 
-// 1. OVERVIEW
+// 1. OVERVIEW & SPARKLINE
 async function loadOverview() {
   try {
     const data = await api('/api/admin/overview');
@@ -151,6 +159,9 @@ async function loadOverview() {
     `;
 
     el('statBytesStreamed').textContent = formatBytes(data.bytesStreamed);
+    const saved = data.assetCache?.bytesSaved || 0;
+    el('statAssetSavedSub').textContent = `${formatBytes(saved)} saved by disk cache`;
+
     el('statCacheHitRate').textContent = `${data.cache.hitRatePercent}%`;
     el('statCacheRatioSub').textContent = `${data.cache.hits} hits / ${data.cache.misses} misses`;
 
@@ -174,6 +185,11 @@ async function loadOverview() {
       }
     }
 
+    // Sparkline Canvas Rendering
+    if (data.throughput) {
+      renderThroughputSparkline(data.throughput);
+    }
+
     // Top client usage table
     const tbody = el('topClientsTableBody');
     if (!data.clients || !data.clients.length) {
@@ -189,12 +205,77 @@ async function loadOverview() {
       `).join('');
     }
 
-    // Set webhook default URL
     const origin = data.publicBaseUrl || window.location.origin;
     el('webhookUrlInput').value = `${origin}/v1/webhook`;
   } catch (e) {
     console.error('Failed to load overview:', e);
   }
+}
+
+function renderThroughputSparkline(data) {
+  const canvas = el('throughputCanvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
+  const dpr = window.devicePixelRatio || 1;
+
+  const w = canvas.clientWidth;
+  const h = canvas.clientHeight;
+  canvas.width = w * dpr;
+  canvas.height = h * dpr;
+  ctx.scale(dpr, dpr);
+
+  ctx.clearRect(0, 0, w, h);
+
+  const values = data.map((d) => d.count);
+  const maxVal = Math.max(...values, 5);
+  const current = values[values.length - 1] || 0;
+  el('currentThroughputBadge').textContent = `${current} req/min`;
+
+  const paddingX = 20;
+  const paddingY = 15;
+  const plotW = w - paddingX * 2;
+  const plotH = h - paddingY * 2;
+  const stepX = plotW / (values.length - 1);
+
+  // Draw area gradient
+  ctx.beginPath();
+  values.forEach((v, idx) => {
+    const x = paddingX + idx * stepX;
+    const y = h - paddingY - (v / maxVal) * plotH;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.lineTo(paddingX + (values.length - 1) * stepX, h - paddingY);
+  ctx.lineTo(paddingX, h - paddingY);
+  ctx.closePath();
+
+  const grad = ctx.createLinearGradient(0, 0, 0, h);
+  grad.addColorStop(0, 'rgba(56, 189, 248, 0.3)');
+  grad.addColorStop(1, 'rgba(56, 189, 248, 0.0)');
+  ctx.fillStyle = grad;
+  ctx.fill();
+
+  // Draw line
+  ctx.beginPath();
+  values.forEach((v, idx) => {
+    const x = paddingX + idx * stepX;
+    const y = h - paddingY - (v / maxVal) * plotH;
+    if (idx === 0) ctx.moveTo(x, y);
+    else ctx.lineTo(x, y);
+  });
+  ctx.strokeStyle = '#38bdf8';
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+
+  // Draw data point circles
+  values.forEach((v, idx) => {
+    const x = paddingX + idx * stepX;
+    const y = h - paddingY - (v / maxVal) * plotH;
+    ctx.beginPath();
+    ctx.arc(x, y, 3, 0, Math.PI * 2);
+    ctx.fillStyle = idx === values.length - 1 ? '#00f0ff' : '#0284c7';
+    ctx.fill();
+  });
 }
 
 // 2. CLIENTS
@@ -204,6 +285,7 @@ async function loadClients() {
     state.clients = list;
     renderClientsTable(list);
     populateSnippetClientSelect(list);
+    populateSandboxClientSelect();
   } catch (e) {
     toast(e.message, 'danger');
   }
@@ -212,37 +294,50 @@ async function loadClients() {
 function renderClientsTable(list) {
   const tbody = el('clientsTableBody');
   const filter = (el('clientSearchInput').value || '').toLowerCase();
-  const filtered = list.filter((c) => c.name.toLowerCase().includes(filter) || c.repos.some((r) => r.includes(filter)));
+  const filtered = list.filter((c) =>
+    c.name.toLowerCase().includes(filter) ||
+    c.repos.some((r) => r.includes(filter)) ||
+    (c.allowedIps && c.allowedIps.some((ip) => ip.includes(filter)))
+  );
 
   if (!filtered.length) {
-    tbody.innerHTML = '<tr><td colspan="8" class="text-center text-muted">No matching clients found</td></tr>';
+    tbody.innerHTML = '<tr><td colspan="10" class="text-center text-muted">No matching clients found</td></tr>';
     return;
   }
 
-  tbody.innerHTML = filtered.map((c) => `
-    <tr>
-      <td>
-        <span class="badge ${c.disabled ? 'badge-danger' : 'badge-success'}">
-          ${c.disabled ? 'Disabled' : 'Active'}
-        </span>
-      </td>
-      <td><strong>${c.name}</strong></td>
-      <td class="text-secondary text-xs">${c.description || '—'}</td>
-      <td>${c.repos.map((r) => `<span class="badge badge-outline text-xs">${r}</span>`).join(' ')}</td>
-      <td>${c.permissions.map((p) => `<span class="badge text-xs">${p}</span>`).join(' ')}</td>
-      <td>${(c.requests || 0).toLocaleString()}</td>
-      <td class="text-muted text-xs">${c.lastSeen ? new Date(c.lastSeen).toLocaleString() : 'Never'}</td>
-      <td class="text-right">
-        <button class="btn-sm btn-outline btn-rotate" data-name="${c.name}">Rotate Key</button>
-        <button class="btn-sm ${c.disabled ? 'btn-outline' : 'btn-ghost'} btn-toggle" data-name="${c.name}" data-disabled="${c.disabled}">
-          ${c.disabled ? 'Enable' : 'Disable'}
-        </button>
-        <button class="btn-sm btn-danger btn-delete" data-name="${c.name}">Delete</button>
-      </td>
-    </tr>
-  `).join('');
+  tbody.innerHTML = filtered.map((c) => {
+    let statusBadge = '<span class="badge badge-success">Active</span>';
+    if (c.disabled) {
+      statusBadge = '<span class="badge badge-danger">Disabled</span>';
+    } else if (c.isExpired) {
+      statusBadge = '<span class="badge badge-warning">Expired</span>';
+    }
 
-  // Attach button events
+    const expStr = c.expiresAt ? new Date(c.expiresAt).toLocaleDateString() : 'Never';
+    const ipsStr = c.allowedIps?.length ? c.allowedIps.join(', ') : '*';
+
+    return `
+      <tr>
+        <td>${statusBadge}</td>
+        <td><strong>${c.name}</strong></td>
+        <td class="text-secondary text-xs">${c.description || '—'}</td>
+        <td>${c.repos.map((r) => `<span class="badge badge-outline text-xs">${r}</span>`).join(' ')}</td>
+        <td>${c.permissions.map((p) => `<span class="badge text-xs">${p}</span>`).join(' ')}</td>
+        <td><code>${ipsStr}</code></td>
+        <td class="text-xs text-muted">${expStr}</td>
+        <td>${(c.requests || 0).toLocaleString()}</td>
+        <td class="text-muted text-xs">${c.lastSeen ? new Date(c.lastSeen).toLocaleTimeString() : 'Never'}</td>
+        <td class="text-right">
+          <button class="btn-sm btn-outline btn-rotate" data-name="${c.name}">Rotate</button>
+          <button class="btn-sm ${c.disabled ? 'btn-outline' : 'btn-ghost'} btn-toggle" data-name="${c.name}" data-disabled="${c.disabled}">
+            ${c.disabled ? 'Enable' : 'Disable'}
+          </button>
+          <button class="btn-sm btn-danger btn-delete" data-name="${c.name}">Delete</button>
+        </td>
+      </tr>
+    `;
+  }).join('');
+
   tbody.querySelectorAll('.btn-rotate').forEach((btn) => {
     btn.onclick = () => rotateClientKey(btn.dataset.name);
   });
@@ -255,7 +350,7 @@ function renderClientsTable(list) {
 }
 
 async function rotateClientKey(name) {
-  if (!confirm(`Are you sure you want to rotate the API key for client "${name}"? The previous key will stop working immediately.`)) return;
+  if (!confirm(`Rotate API key for client "${name}"? Previous key will stop working immediately.`)) return;
   try {
     const res = await api(`/api/admin/clients/${encodeURIComponent(name)}/rotate-key`, { method: 'POST' });
     showKeyModal(name, res.key);
@@ -363,17 +458,24 @@ async function loadReleases(fullName) {
 
 function renderReleases(list) {
   const container = el('releasesContainer');
-  if (!list.length) {
-    container.innerHTML = '<div class="text-center text-muted p-4">No releases published for this repository yet</div>';
+  let filtered = list;
+  if (state.selectedChannel === 'stable') {
+    filtered = list.filter((r) => !r.prerelease && !/-alpha|-beta|-rc/i.test(r.tag_name));
+  } else if (state.selectedChannel === 'beta') {
+    filtered = list.filter((r) => r.prerelease || /-alpha|-beta|-rc/i.test(r.tag_name));
+  }
+
+  if (!filtered.length) {
+    container.innerHTML = '<div class="text-center text-muted p-4">No releases found matching this channel</div>';
     return;
   }
 
-  container.innerHTML = list.map((rel) => `
+  container.innerHTML = filtered.map((rel) => `
     <div class="release-card">
       <div class="release-title-row">
         <span class="release-tag">${rel.tag_name}</span>
         <strong>${rel.name || rel.tag_name}</strong>
-        ${rel.prerelease ? '<span class="badge badge-warning">Pre-release</span>' : ''}
+        ${rel.prerelease ? '<span class="badge badge-warning">Pre-release</span>' : '<span class="badge badge-success">Stable</span>'}
         <span class="text-muted text-xs" style="margin-left: auto;">
           Published: ${new Date(rel.published_at).toLocaleDateString()}
         </span>
@@ -386,7 +488,8 @@ function renderReleases(list) {
             <tr>
               <th>Asset File</th>
               <th>Size</th>
-              <th>Action</th>
+              <th>Disk Cache</th>
+              <th class="text-right">Action</th>
             </tr>
           </thead>
           <tbody>
@@ -395,6 +498,14 @@ function renderReleases(list) {
                 <td><code>${a.name}</code></td>
                 <td class="text-muted">${formatBytes(a.size)}</td>
                 <td>
+                  ${a.cachedLocally
+                    ? '<span class="cached-indicator">💾 Cached Locally</span>'
+                    : '<span class="text-muted text-xs">☁️ On GitHub</span>'}
+                </td>
+                <td class="text-right">
+                  ${!a.cachedLocally ? `
+                    <button class="btn-sm btn-outline btn-prewarm" data-id="${a.id}" data-name="${a.name}">Pre-warm to Disk</button>
+                  ` : ''}
                   <a href="${a.download_url}" target="_blank" class="btn-sm btn-outline">Direct URL</a>
                 </td>
               </tr>
@@ -404,6 +515,25 @@ function renderReleases(list) {
       ` : '<div class="text-muted text-xs mt-3">No binary assets attached</div>'}
     </div>
   `).join('');
+
+  container.querySelectorAll('.btn-prewarm').forEach((btn) => {
+    btn.onclick = async () => {
+      btn.textContent = 'Caching...';
+      btn.disabled = true;
+      try {
+        const [owner, repo] = state.selectedRepo.full_name.split('/');
+        await api('/api/admin/asset-cache/prefetch', {
+          method: 'POST',
+          body: { owner, repo, assetId: btn.dataset.id, name: btn.dataset.name },
+        });
+        toast(`Pre-warming initiated for ${btn.dataset.name}`, 'info');
+      } catch (e) {
+        toast(e.message, 'danger');
+        btn.disabled = false;
+        btn.textContent = 'Pre-warm to Disk';
+      }
+    };
+  });
 }
 
 function populateSnippetClientSelect(clients) {
@@ -422,10 +552,10 @@ function updateSnippet() {
   let code = '';
   switch (lang) {
     case 'curl':
-      code = `# Check for updates\ncurl -H "Authorization: Bearer ${key}" \\\n  "${host}/v1/repos/${repo}/update?current=1.0.0"\n\n# Download latest release asset\ncurl -H "Authorization: Bearer ${key}" \\\n  -OJ "${host}/v1/repos/${repo}/releases/assets/<ASSET_ID>"`;
+      code = `# Check for stable updates\ncurl -H "Authorization: Bearer ${key}" \\\n  "${host}/v1/repos/${repo}/update?current=1.0.0&channel=stable"\n\n# Download latest release asset (with resume/range support)\ncurl -H "Authorization: Bearer ${key}" \\\n  -C - -OJ "${host}/v1/repos/${repo}/releases/assets/<ASSET_ID>"`;
       break;
     case 'ps':
-      code = `# Check for updates\n$headers = @{ "Authorization" = "Bearer ${key}" }\n$update = Invoke-RestMethod -Uri "${host}/v1/repos/${repo}/update?current=1.0.0" -Headers $headers\n\n# Download asset if available\nif ($update.update_available) {\n    $asset = $update.release.assets[0]\n    Invoke-WebRequest -Uri $asset.download_url -Headers $headers -OutFile $asset.name\n}`;
+      code = `# Check for updates\n$headers = @{ "Authorization" = "Bearer ${key}" }\n$update = Invoke-RestMethod -Uri "${host}/v1/repos/${repo}/update?current=1.0.0" -Headers $headers\n\nif ($update.update_available) {\n    $asset = $update.release.assets[0]\n    Invoke-WebRequest -Uri $asset.download_url -Headers $headers -OutFile $asset.name\n}`;
       break;
     case 'node':
       code = `// Fetch latest release and assets\nconst res = await fetch('${host}/v1/repos/${repo}/releases/latest', {\n  headers: { 'Authorization': 'Bearer ${key}' }\n});\nconst release = await res.json();\nconsole.log('Latest tag:', release.tag_name);\nconsole.log('Assets:', release.assets);`;
@@ -437,7 +567,42 @@ function updateSnippet() {
   el('snippetCode').textContent = code;
 }
 
-// 4. LIVE LOGS (SSE)
+// 4. API SANDBOX
+function populateSandboxClientSelect() {
+  const sel = el('sandboxClientSelect');
+  sel.innerHTML = '<option value="">(No API Key - Anonymous)</option>' +
+    state.clients.map((c) => `<option value="${c.name}">${c.name}</option>`).join('');
+}
+
+async function executeSandboxRequest() {
+  const path = el('sandboxPathInput').value.trim();
+  const method = el('sandboxMethod').value;
+  const clientName = el('sandboxClientSelect').value;
+
+  const card = el('sandboxResultCard');
+  card.classList.remove('hidden');
+  el('sandboxResponseBody').textContent = 'Executing request...';
+
+  try {
+    const res = await api('/api/admin/tester', {
+      method: 'POST',
+      body: { path, method, clientKey: clientName ? 'simulated' : null },
+    });
+
+    const statusTag = el('sandboxStatusTag');
+    statusTag.textContent = `${res.status} ${res.ok ? 'OK' : 'Error'}`;
+    statusTag.className = `status-tag ${res.ok ? 'tag-2xx' : 'tag-4xx'}`;
+
+    el('sandboxLatency').textContent = `⏱️ ${res.latencyMs} ms`;
+    el('sandboxResponseBody').textContent = typeof res.body === 'object'
+      ? JSON.stringify(res.body, null, 2)
+      : String(res.body);
+  } catch (e) {
+    el('sandboxResponseBody').textContent = `Request failed: ${e.message}`;
+  }
+}
+
+// 5. LIVE LOGS (SSE)
 function handleIncomingLog(log) {
   state.logCounter++;
   el('logCounter').textContent = state.logCounter;
@@ -464,7 +629,6 @@ function handleIncomingLog(log) {
 
   tbody.insertBefore(tr, tbody.firstChild);
 
-  // Keep max 200 rows in DOM
   while (tbody.children.length > 200) {
     tbody.lastChild.remove();
   }
@@ -499,6 +663,15 @@ function initSSE() {
     } catch {}
   });
 
+  es.addEventListener('asset_cached', (e) => {
+    try {
+      const d = JSON.parse(e.data);
+      toast(`Asset "${d.name}" cached locally on disk`, 'success');
+      loadOverview();
+      if (state.selectedRepo) loadReleases(state.selectedRepo.full_name);
+    } catch {}
+  });
+
   es.addEventListener('webhook', (e) => {
     try {
       const data = JSON.parse(e.data);
@@ -522,7 +695,33 @@ function initSSE() {
   };
 }
 
-// 5. DIAGNOSTICS & CACHE
+// 6. AUDIT TRAIL
+async function loadAuditLogs() {
+  const tbody = el('auditTableBody');
+  tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">Loading audit entries...</td></tr>';
+  try {
+    const list = await api('/api/admin/audit?limit=100');
+    if (!list.length) {
+      tbody.innerHTML = '<tr><td colspan="6" class="text-center text-muted">No audit events recorded yet</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = list.map((a) => `
+      <tr>
+        <td class="text-muted text-xs">${new Date(a.timestamp).toLocaleString()}</td>
+        <td><strong>${a.actor}</strong></td>
+        <td><span class="badge badge-outline">${a.action}</span></td>
+        <td><code>${a.target || '—'}</code></td>
+        <td class="text-muted text-xs">${a.ip}</td>
+        <td class="text-secondary text-xs">${JSON.stringify(a.details || {})}</td>
+      </tr>
+    `).join('');
+  } catch (e) {
+    tbody.innerHTML = `<tr><td colspan="6" class="text-center text-danger">${e.message}</td></tr>`;
+  }
+}
+
+// 7. DIAGNOSTICS & CACHE
 async function runDiagnostics() {
   const container = el('diagOutput');
   container.innerHTML = '<span class="text-muted">Running diagnostic probe to GitHub upstream...</span>';
@@ -555,6 +754,49 @@ async function loadCacheStats() {
   }
 }
 
+async function loadAssetCacheStats() {
+  try {
+    const data = await api('/api/admin/asset-cache');
+    state.assetStats = data;
+    el('diskCacheBandwidthSaved').textContent = `${formatBytes(data.bytesSaved || 0)} saved`;
+
+    const tbody = el('assetCacheTableBody');
+    if (!data.items || !data.items.length) {
+      tbody.innerHTML = '<tr><td colspan="7" class="text-center text-muted">No release binaries cached on disk yet</td></tr>';
+      return;
+    }
+
+    tbody.innerHTML = data.items.map((item) => `
+      <tr>
+        <td><code>${item.assetId}</code></td>
+        <td><strong>${item.name}</strong></td>
+        <td>${formatBytes(item.size)}</td>
+        <td>${(item.hitCount || 0).toLocaleString()}</td>
+        <td class="text-muted text-xs">${new Date(item.cachedAt).toLocaleDateString()}</td>
+        <td class="text-muted text-xs">${item.lastAccessed ? new Date(item.lastAccessed).toLocaleTimeString() : '—'}</td>
+        <td class="text-right">
+          <button class="btn-sm btn-danger btn-purge-asset" data-id="${item.assetId}">Purge</button>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('.btn-purge-asset').forEach((btn) => {
+      btn.onclick = async () => {
+        try {
+          await api(`/api/admin/asset-cache/${btn.dataset.id}`, { method: 'DELETE' });
+          toast(`Asset ${btn.dataset.id} purged from disk`, 'success');
+          loadAssetCacheStats();
+          loadOverview();
+        } catch (e) {
+          toast(e.message, 'danger');
+        }
+      };
+    });
+  } catch (e) {
+    console.error('Failed to load asset cache:', e);
+  }
+}
+
 async function purgeCache(pattern = null) {
   try {
     const res = await api('/api/admin/cache/clear', {
@@ -571,14 +813,11 @@ async function purgeCache(pattern = null) {
 
 // Event Listeners setup
 function setupEventListeners() {
-  // Login
   el('btnLoginSubmit').onclick = handleLogin;
   el('inputAdminToken').addEventListener('keydown', (e) => {
     if (e.key === 'Enter') handleLogin();
   });
   el('btnSwitchToken').onclick = () => showAdminLoginModal();
-
-  // Overview refresh
   el('btnRefreshOverview').onclick = loadOverview;
 
   // Clients
@@ -586,6 +825,8 @@ function setupEventListeners() {
     el('newClientName').value = '';
     el('newClientDesc').value = '';
     el('newClientRepos').value = '*';
+    el('newClientIps').value = '*';
+    el('newClientExpires').value = '90d';
     el('modalAddClient').classList.remove('hidden');
   };
   el('btnCloseAddClientModal').onclick = () => el('modalAddClient').classList.add('hidden');
@@ -595,6 +836,14 @@ function setupEventListeners() {
     const name = el('newClientName').value.trim();
     const description = el('newClientDesc').value.trim();
     const repos = el('newClientRepos').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const allowedIps = el('newClientIps').value.split(',').map((s) => s.trim()).filter(Boolean);
+    const expChoice = el('newClientExpires').value;
+
+    let expiresAt = null;
+    if (expChoice === '30d') expiresAt = new Date(Date.now() + 30 * 86400000).toISOString();
+    else if (expChoice === '90d') expiresAt = new Date(Date.now() + 90 * 86400000).toISOString();
+    else if (expChoice === '365d') expiresAt = new Date(Date.now() + 365 * 86400000).toISOString();
+
     const permissions = [];
     if (el('permReleases').checked) permissions.push('releases');
     if (el('permRaw').checked) permissions.push('raw');
@@ -606,7 +855,7 @@ function setupEventListeners() {
     try {
       const res = await api('/api/admin/clients', {
         method: 'POST',
-        body: { name, description, repos, permissions },
+        body: { name, description, repos, allowedIps, expiresAt, permissions },
       });
       el('modalAddClient').classList.add('hidden');
       showKeyModal(res.client.name, res.key);
@@ -632,6 +881,15 @@ function setupEventListeners() {
     if (state.selectedRepo) loadReleases(state.selectedRepo.full_name);
   };
 
+  document.querySelectorAll('.channel-filter-btn').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('.channel-filter-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      state.selectedChannel = btn.dataset.channel;
+      renderReleases(state.releases);
+    };
+  });
+
   document.querySelectorAll('.snippet-tab-btn').forEach((btn) => {
     btn.onclick = () => {
       document.querySelectorAll('.snippet-tab-btn').forEach((b) => b.classList.remove('active'));
@@ -646,6 +904,16 @@ function setupEventListeners() {
     toast('Snippet copied to clipboard!', 'success');
   };
 
+  // Sandbox
+  el('sandboxPresetSelect').onchange = (e) => {
+    const val = e.target.value;
+    const repo = state.selectedRepo?.full_name || 'merlinthedev848/MSuite-SIP';
+    if (val === 'me') el('sandboxPathInput').value = '/v1/me';
+    else if (val === 'update') el('sandboxPathInput').value = `/v1/repos/${repo}/update?current=1.0.0`;
+    else if (val === 'latest') el('sandboxPathInput').value = `/v1/repos/${repo}/releases/latest`;
+  };
+  el('btnExecuteSandbox').onclick = executeSandboxRequest;
+
   // Live logs
   el('btnToggleLogPause').onclick = () => {
     state.isLogPaused = !state.isLogPaused;
@@ -659,6 +927,9 @@ function setupEventListeners() {
   el('chkAutoScroll').onchange = (e) => {
     state.autoScrollLogs = e.target.checked;
   };
+
+  // Audit
+  el('btnRefreshAudit').onclick = loadAuditLogs;
 
   // Diagnostics
   el('btnRunDiagnostics').onclick = runDiagnostics;
@@ -685,7 +956,6 @@ window.addEventListener('DOMContentLoaded', () => {
     loadOverview();
   }
 
-  // Periodic overview refresh every 10 seconds
   setInterval(() => {
     if (state.activeTab === 'overview' && state.adminToken) {
       loadOverview();
