@@ -243,11 +243,21 @@ test('asset download streams and tees to local disk cache', async () => {
   // Wait for background disk write
   await new Promise((r) => setTimeout(r, 200));
 
-  // Second request should be a local disk cache HIT
+  // Second request should be a local disk cache HIT with SHA-256 checksum headers
   const r2 = await get('/v1/repos/acme/app/releases/assets/42');
   assert.equal(r2.status, 200);
   assert.equal(r2.headers.get('x-nexus-cache'), 'HIT');
   assert.equal(await r2.text(), 'ZIPPY_DATA_CONTENT');
+  const sha256 = r2.headers.get('x-checksum-sha256');
+  assert.ok(sha256 && sha256.length === 64, 'X-Checksum-Sha256 should be 64-char hex');
+  assert.ok(r2.headers.get('digest')?.startsWith('sha-256='), 'Digest header should have sha-256');
+
+  // Verify asset digest endpoint
+  const digestRes = await get('/v1/repos/acme/app/releases/assets/42/digest');
+  assert.equal(digestRes.status, 200);
+  const digestData = await digestRes.json();
+  assert.equal(digestData.cachedLocally, true);
+  assert.equal(digestData.sha256, sha256);
 
   // Third request: Range request (HTTP 206 Partial Content)
   const r3 = await get('/v1/repos/acme/app/releases/assets/42', KEY_A, { Range: 'bytes=0-4' });
@@ -431,4 +441,48 @@ test('safeIsoDate and resilient AuditLogger parsing', () => {
   assert.equal(entries.length, 2);
   assert.equal(entries[0].action, 'SECOND');
   assert.equal(entries[1].action, 'FIRST');
+});
+
+test('OpenAPI 3.1 specification endpoint (/openapi.json)', async () => {
+  const res = await fetch(base + '/openapi.json');
+  assert.equal(res.status, 200);
+  assert.equal(res.headers.get('content-type')?.includes('application/json'), true);
+  const spec = await res.json();
+  assert.equal(spec.openapi, '3.1.0');
+  assert.equal(spec.info.title, 'MSuite Nexus API');
+  assert.ok(spec.paths['/v1/repos/{owner}/{repo}/update']);
+  assert.ok(spec.paths['/v1/repos/{owner}/{repo}/releases/assets/{id}']);
+  assert.ok(spec.paths['/v1/repos/{owner}/{repo}/releases/assets/{id}/digest']);
+});
+
+test('Per-client custom rate limit enforcement', async () => {
+  // Create client with tight rateLimit: 2 requests per minute
+  const clientRes = await adminReq('/api/admin/clients', 'POST', {
+    name: 'rate-limited-worker',
+    repos: ['*'],
+    permissions: ['releases'],
+    rateLimit: 2,
+  });
+  assert.equal(clientRes.status, 201);
+  const clientData = await clientRes.json();
+  const workerKey = clientData.key;
+
+  // Req 1: allowed
+  const r1 = await get('/v1/me', workerKey);
+  assert.equal(r1.status, 200);
+  assert.equal(r1.headers.get('x-ratelimit-limit'), '2');
+  assert.equal(r1.headers.get('x-ratelimit-remaining'), '1');
+
+  // Req 2: allowed
+  const r2 = await get('/v1/me', workerKey);
+  assert.equal(r2.status, 200);
+  assert.equal(r2.headers.get('x-ratelimit-remaining'), '0');
+
+  // Req 3: throttled with 429
+  const r3 = await get('/v1/me', workerKey);
+  assert.equal(r3.status, 429);
+  assert.ok(r3.headers.get('retry-after'));
+
+  // Clean up
+  await adminReq('/api/admin/clients/rate-limited-worker', 'DELETE');
 });

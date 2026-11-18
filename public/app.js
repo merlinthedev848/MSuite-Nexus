@@ -901,6 +901,7 @@ function setupEventListeners() {
     el('newClientRepos').value = '*';
     el('newClientIps').value = '*';
     el('newClientExpires').value = '90d';
+    if (el('newClientRateLimit')) el('newClientRateLimit').value = '';
     el('modalAddClient').classList.remove('hidden');
     el('newClientName').focus();
   };
@@ -919,6 +920,9 @@ function setupEventListeners() {
     else if (expChoice === '90d') expiresAt = new Date(Date.now() + 90 * 86400000).toISOString();
     else if (expChoice === '365d') expiresAt = new Date(Date.now() + 365 * 86400000).toISOString();
 
+    const rateLimitVal = el('newClientRateLimit')?.value.trim();
+    const rateLimit = rateLimitVal ? parseInt(rateLimitVal, 10) : undefined;
+
     const permissions = [];
     if (el('permReleases').checked) permissions.push('releases');
     if (el('permRaw').checked) permissions.push('raw');
@@ -930,7 +934,7 @@ function setupEventListeners() {
     try {
       const res = await api('/api/admin/clients', {
         method: 'POST',
-        body: { name, description, repos, allowedIps, expiresAt, permissions },
+        body: { name, description, repos, allowedIps, expiresAt, permissions, rateLimit },
       });
       el('modalAddClient').classList.add('hidden');
       showKeyModal(res.client.name, res.key);

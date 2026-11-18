@@ -89,12 +89,14 @@ All `/v1` endpoints require authentication via:
 |---|---|---|---|
 | `GET` | `/health` | *none* | Service health and liveness check |
 | `GET` | `/metrics` | *none* | Prometheus metrics export |
-| `GET` | `/v1/me` | *any* | Verifies key and returns allowed repos, CIDRs & permissions |
+| `GET` | `/openapi.json` | *none* | OpenAPI 3.1 Specification for typed SDKs and Postman import |
+| `GET` | `/v1/me` | *any* | Verifies key and returns allowed repos, CIDRs, permissions & rate limit |
 | `GET` | `/v1/repos/:owner/:repo/update?current=1.2.0[&channel=stable]` | `releases` | Checks if a newer release exists; returns download URLs |
 | `GET` | `/v1/repos/:owner/:repo/releases/latest[?channel=beta]` | `releases` | Fetches the latest published release and rewritten assets |
 | `GET` | `/v1/repos/:owner/:repo/releases` | `releases` | Lists releases (drafts excluded, supports `?per_page=N`) |
 | `GET` | `/v1/repos/:owner/:repo/releases/tags/:tag` | `releases` | Fetches release by tag name |
-| `GET` | `/v1/repos/:owner/:repo/releases/assets/:id` | `releases` | Streams the binary asset (supports HTTP `Range` / resume & disk cache) |
+| `GET` | `/v1/repos/:owner/:repo/releases/assets/:id` | `releases` | Streams the binary asset (supports HTTP `Range` / resume, disk cache & `Digest` / `X-Checksum-Sha256` headers) |
+| `GET` | `/v1/repos/:owner/:repo/releases/assets/:id/digest` | `releases` | Returns cryptographic SHA-256 digest and file metadata |
 | `GET` | `/v1/repos/:owner/:repo/raw/*path?ref=main` | `raw` | Streams raw file content with safe Content-Type |
 | `GET` | `/v1/repos/:owner/:repo/archive?ref=main&format=zip` | `archive` | Streams repo source archive (`zip` or `tar`) |
 | `POST` | `/v1/webhook` | *none / HMAC* | GitHub webhook receiver for instant cache invalidation |

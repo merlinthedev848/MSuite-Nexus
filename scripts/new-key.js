@@ -10,12 +10,14 @@ let perms = PERMISSIONS;
 let allowedIps = ['*'];
 let expiresAt = null;
 let description = '';
+let rateLimit = null;
 const positional = [];
 
 for (let i = 0; i < args.length; i++) {
   if (args[i] === '--file') file = args[++i];
   else if (args[i] === '--perms') perms = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
   else if (args[i] === '--ips') allowedIps = args[++i].split(',').map((s) => s.trim()).filter(Boolean);
+  else if (args[i] === '--rate-limit') rateLimit = parseInt(args[++i], 10);
   else if (args[i] === '--expires') {
     const rawExp = args[++i];
     const expTime = new Date(rawExp).getTime();
@@ -60,6 +62,7 @@ data.clients.push({
   permissions: perms,
   allowedIps,
   expiresAt,
+  rateLimit: Number.isFinite(rateLimit) && rateLimit >= 0 ? rateLimit : undefined,
   createdAt: new Date().toISOString(),
 });
 

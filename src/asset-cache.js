@@ -1,7 +1,8 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import { Readable } from 'node:stream';
+import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { createHash } from 'node:crypto';
 
 /**
  * Local Disk Asset Cache
@@ -92,13 +93,20 @@ export class AssetCache {
     this.hits++;
     this.bytesSaved += fileSize;
 
-    res.set({
+    const headers = {
       'Content-Type': meta.contentType || 'application/octet-stream',
       'Content-Disposition': meta.contentDisposition || `attachment; filename="${meta.name || `asset_${assetId}`}"`,
       'Accept-Ranges': 'bytes',
       'X-Nexus-Cache': 'HIT',
       'ETag': meta.etag || `"${assetId}-${stat.mtimeMs}"`,
-    });
+    };
+
+    if (meta.sha256) {
+      headers['X-Checksum-Sha256'] = meta.sha256;
+      headers['Digest'] = `sha-256=${meta.sha256Base64 || Buffer.from(meta.sha256, 'hex').toString('base64')}`;
+    }
+
+    res.set(headers);
 
     const range = req.get('range');
     if (range) {
@@ -137,20 +145,33 @@ export class AssetCache {
     const destPath = this.getFilePath(assetId);
 
     try {
+      const hasher = createHash('sha256');
+      const hashPass = new Transform({
+        transform(chunk, encoding, callback) {
+          hasher.update(chunk);
+          callback(null, chunk);
+        },
+      });
+
       const writeStream = fs.createWriteStream(tempPath);
-      await pipeline(stream, writeStream);
+      await pipeline(stream, hashPass, writeStream);
 
       fs.renameSync(tempPath, destPath);
+      const sha256Hex = hasher.digest('hex');
+      const sha256Base64 = Buffer.from(sha256Hex, 'hex').toString('base64');
+
       this.saveMeta(assetId, {
         ...meta,
         assetId,
+        sha256: sha256Hex,
+        sha256Base64,
         cachedAt: new Date().toISOString(),
         lastAccessed: new Date().toISOString(),
         hitCount: 0,
         size: fs.statSync(destPath).size,
       });
 
-      this.log(`Asset ${assetId} (${meta.name || 'unnamed'}) cached locally.`);
+      this.log(`Asset ${assetId} (${meta.name || 'unnamed'}) cached locally with SHA-256 ${sha256Hex.slice(0, 8)}...`);
       this.pruneIfNeeded();
     } catch (e) {
       if (fs.existsSync(tempPath)) {

@@ -103,11 +103,11 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
   });
 
   router.post('/clients', (req, res) => {
-    const { name, repos, permissions, description, allowedIps, expiresAt } = req.body || {};
+    const { name, repos, permissions, description, allowedIps, expiresAt, rateLimit } = req.body || {};
     try {
-      const result = clients.addClient({ name, repos, permissions, description, allowedIps, expiresAt });
+      const result = clients.addClient({ name, repos, permissions, description, allowedIps, expiresAt, rateLimit });
       events.broadcast('client_change', { action: 'add', name: result.client.name });
-      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_CREATED', target: result.client.name, details: { repos, permissions } });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_CREATED', target: result.client.name, details: { repos, permissions, rateLimit } });
       log(`Admin added client "${result.client.name}"`);
       res.status(201).json({
         ok: true,
@@ -118,6 +118,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
           description: result.client.description,
           allowedIps: result.client.allowedIps,
           expiresAt: result.client.expiresAt,
+          rateLimit: result.client.rateLimit,
         },
         key: result.key,
       });
@@ -127,11 +128,11 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
   });
 
   router.put('/clients/:name', (req, res) => {
-    const { repos, permissions, disabled, description, allowedIps, expiresAt } = req.body || {};
+    const { repos, permissions, disabled, description, allowedIps, expiresAt, rateLimit } = req.body || {};
     try {
-      const updated = clients.updateClient(req.params.name, { repos, permissions, disabled, description, allowedIps, expiresAt });
+      const updated = clients.updateClient(req.params.name, { repos, permissions, disabled, description, allowedIps, expiresAt, rateLimit });
       events.broadcast('client_change', { action: 'update', name: req.params.name });
-      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_UPDATED', target: req.params.name, details: { disabled } });
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'CLIENT_UPDATED', target: req.params.name, details: { disabled, rateLimit } });
       log(`Admin updated client "${req.params.name}"`);
       res.json({
         ok: true,
@@ -143,6 +144,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
           description: updated.description,
           allowedIps: updated.allowedIps,
           expiresAt: updated.expiresAt,
+          rateLimit: updated.rateLimit,
         },
       });
     } catch (e) {

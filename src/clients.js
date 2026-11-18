@@ -104,6 +104,7 @@ export function parseClients(data) {
       description: c.description ? String(c.description).trim() : '',
       allowedIps: Array.isArray(c.allowedIps) && c.allowedIps.length ? c.allowedIps.map((s) => String(s).trim()) : ['*'],
       expiresAt: safeIsoDate(c.expiresAt),
+      rateLimit: Number.isFinite(c.rateLimit) && c.rateLimit >= 0 ? Number(c.rateLimit) : null,
     };
 
     byName.set(name.toLowerCase(), clientObj);
@@ -153,6 +154,7 @@ export class ClientStore {
       disabled: c.disabled,
       allowedIps: c.allowedIps,
       expiresAt: c.expiresAt,
+      rateLimit: c.rateLimit !== undefined ? c.rateLimit : undefined,
       createdAt: c.createdAt || new Date().toISOString(),
     }));
 
@@ -203,6 +205,7 @@ export class ClientStore {
       allowedIps: c.allowedIps,
       expiresAt: c.expiresAt,
       isExpired: isClientExpired(c),
+      rateLimit: c.rateLimit ?? null,
       keyMasked: c.keyHash.slice(0, 8) + '...' + c.keyHash.slice(-8),
       createdAt: c.createdAt,
     }));
@@ -220,6 +223,7 @@ export class ClientStore {
     description = '',
     allowedIps = ['*'],
     expiresAt = null,
+    rateLimit = null,
   }) {
     if (!name || typeof name !== 'string' || !name.trim()) throw new Error('Client name is required');
     const trimmedName = name.trim();
@@ -240,6 +244,7 @@ export class ClientStore {
       disabled: false,
       allowedIps: Array.isArray(allowedIps) && allowedIps.length ? allowedIps.map((s) => String(s).trim()) : ['*'],
       expiresAt: safeIsoDate(expiresAt),
+      rateLimit: Number.isFinite(rateLimit) && rateLimit >= 0 ? Number(rateLimit) : null,
       keyHash,
       createdAt: new Date().toISOString(),
     };
@@ -251,7 +256,7 @@ export class ClientStore {
     return { client: clientObj, key };
   }
 
-  updateClient(name, { repos, permissions, disabled, description, allowedIps, expiresAt }) {
+  updateClient(name, { repos, permissions, disabled, description, allowedIps, expiresAt, rateLimit }) {
     const client = this.getClient(name);
     if (!client) throw new Error(`Client "${name}" not found`);
 
@@ -272,6 +277,9 @@ export class ClientStore {
     }
     if (expiresAt !== undefined) {
       client.expiresAt = safeIsoDate(expiresAt);
+    }
+    if (rateLimit !== undefined) {
+      client.rateLimit = Number.isFinite(rateLimit) && rateLimit >= 0 ? Number(rateLimit) : null;
     }
     if (disabled !== undefined) {
       client.disabled = Boolean(disabled);

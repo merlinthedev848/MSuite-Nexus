@@ -9,6 +9,7 @@ import { UpstreamError } from './github.js';
 import { compareVersions } from './version.js';
 import { createAdminRouter } from './admin.js';
 import { createWebhookHandler } from './webhook.js';
+import { generateOpenApiSpec } from './openapi.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -86,6 +87,14 @@ export function createApp({ config, clients, github, metrics, events, assetCache
     res.type('text/plain; version=0.0.4; charset=utf-8');
     res.send(metrics.toPrometheusText(rateLimits, assetStats));
   });
+
+  // OpenAPI 3.1 Specification endpoint
+  const openApiHandler = (req, res) => {
+    const spec = generateOpenApiSpec({ publicBaseUrl: baseUrl(req) });
+    res.json(spec);
+  };
+  app.get('/openapi.json', openApiHandler);
+  app.get('/api/openapi.json', openApiHandler);
 
   // --- security headers + telemetry logging ---
   app.use((req, res, next) => {
@@ -202,7 +211,11 @@ export function createApp({ config, clients, github, metrics, events, assetCache
 
     req.client = client;
 
-    if (config.rateLimitPerMinute > 0) {
+    const clientLimit = typeof client.rateLimit === 'number' && client.rateLimit >= 0
+      ? client.rateLimit
+      : config.rateLimitPerMinute;
+
+    if (clientLimit > 0) {
       const minute = Math.floor(Date.now() / 60000);
       let w = windows.get(client.name);
       if (!w || w.minute !== minute) {
@@ -210,9 +223,9 @@ export function createApp({ config, clients, github, metrics, events, assetCache
         windows.set(client.name, w);
       }
       w.count++;
-      res.set('X-RateLimit-Limit', String(config.rateLimitPerMinute));
-      res.set('X-RateLimit-Remaining', String(Math.max(0, config.rateLimitPerMinute - w.count)));
-      if (w.count > config.rateLimitPerMinute) {
+      res.set('X-RateLimit-Limit', String(clientLimit));
+      res.set('X-RateLimit-Remaining', String(Math.max(0, clientLimit - w.count)));
+      if (w.count > clientLimit) {
         res.set('Retry-After', String(60 - Math.floor((Date.now() / 1000) % 60)));
         return next(new HttpError(429, 'rate_limited', 'Too many requests'));
       }
@@ -227,6 +240,7 @@ export function createApp({ config, clients, github, metrics, events, assetCache
       permissions: [...req.client.permissions],
       allowedIps: req.client.allowedIps,
       expiresAt: req.client.expiresAt,
+      rateLimit: req.client.rateLimit ?? config.rateLimitPerMinute,
     });
   });
 
@@ -251,15 +265,19 @@ export function createApp({ config, clients, github, metrics, events, assetCache
       prerelease: rel.prerelease,
       created_at: rel.created_at,
       published_at: rel.published_at,
-      assets: (rel.assets || []).map((a) => ({
-        id: a.id,
-        name: a.name,
-        label: a.label,
-        size: a.size,
-        content_type: a.content_type,
-        updated_at: a.updated_at,
-        download_url: `${base}/v1/repos/${enc(owner)}/${enc(repo)}/releases/assets/${a.id}`,
-      })),
+      assets: (rel.assets || []).map((a) => {
+        const cachedMeta = assetCache?.has(a.id) ? assetCache.getMeta(a.id) : null;
+        return {
+          id: a.id,
+          name: a.name,
+          label: a.label,
+          size: a.size,
+          content_type: a.content_type,
+          sha256: cachedMeta?.sha256 || null,
+          updated_at: a.updated_at,
+          download_url: `${base}/v1/repos/${enc(owner)}/${enc(repo)}/releases/assets/${a.id}`,
+        };
+      }),
     };
   };
 
@@ -355,6 +373,32 @@ export function createApp({ config, clients, github, metrics, events, assetCache
     } else {
       await pipeline(upstreamStream, res);
     }
+  }));
+
+  // Asset SHA-256 digest & metadata lookup
+  v1.get('/repos/:owner/:repo/releases/assets/:id/digest', repoGuard('releases'), wrap(async (req, res) => {
+    const assetId = req.params.id;
+    if (!/^\d{1,20}$/.test(assetId)) throw new HttpError(400, 'bad_request', 'Invalid asset id');
+
+    if (assetCache && assetCache.has(assetId)) {
+      const meta = assetCache.getMeta(assetId);
+      if (meta?.sha256) {
+        return res.json({
+          assetId,
+          name: meta.name,
+          size: meta.size,
+          sha256: meta.sha256,
+          digest: `sha-256=${meta.sha256Base64 || Buffer.from(meta.sha256, 'hex').toString('base64')}`,
+          cachedLocally: true,
+        });
+      }
+    }
+
+    res.json({
+      assetId,
+      cachedLocally: false,
+      message: 'Asset not yet cached locally on disk; download asset first to generate SHA-256 digest',
+    });
   }));
 
   // Update check with channels: /update?current=1.2.3[&channel=stable|beta]

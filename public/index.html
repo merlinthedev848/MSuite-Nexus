@@ -35,6 +35,9 @@
         <a href="/metrics" target="_blank" class="nav-link-pill" title="Prometheus Metrics Endpoint">
           <span class="pill-dot"></span> /metrics
         </a>
+        <a href="/openapi.json" target="_blank" class="nav-link-pill" title="OpenAPI 3.1 Specification">
+          <span class="pill-dot" style="background: #a855f7;"></span> /openapi.json
+        </a>
       </div>
 
       <div class="nav-actions">
@@ -596,6 +599,12 @@
               <option value="90d" selected>90 Days (Recommended)</option>
               <option value="365d">1 Year</option>
             </select>
+          </div>
+
+          <div class="form-group">
+            <label class="form-label" for="newClientRateLimit">Custom Rate Limit (req/min)</label>
+            <input type="number" id="newClientRateLimit" class="form-input" placeholder="Default (global 120 req/min) or 0 for unlimited">
+            <span class="form-hint">Leave blank to use the server default, or set a custom rate limit for this app.</span>
           </div>
 
           <div class="form-group">
