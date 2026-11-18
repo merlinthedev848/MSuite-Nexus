@@ -1,0 +1,10 @@
+services:
+  codehandler:
+    build: .
+    image: msuite-codehandler:latest
+    restart: unless-stopped
+    env_file: .env
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./clients.json:/config/clients.json:ro

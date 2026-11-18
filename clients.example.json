@@ -1,0 +1,11 @@
+{
+  "clients": [
+    {
+      "name": "example-app",
+      "keyHash": "0000000000000000000000000000000000000000000000000000000000000000",
+      "repos": ["merlinthedev848/MSuite-SIP"],
+      "permissions": ["releases"],
+      "disabled": true
+    }
+  ]
+}
