@@ -170,6 +170,9 @@ function loadActiveTabData() {
       loadCacheStats();
       loadAssetCacheStats();
       break;
+    case 'settings':
+      loadSettings();
+      break;
   }
 }
 
@@ -322,6 +325,12 @@ async function loadClients() {
 }
 
 function renderClientsTable(list) {
+  const hero = el('onboardingHeroCard');
+  if (hero) {
+    if (!list || !list.length) hero.classList.remove('hidden');
+    else hero.classList.add('hidden');
+  }
+
   const tbody = el('clientsTableBody');
   const filter = (el('clientSearchInput').value || '').toLowerCase();
   const filtered = list.filter((c) =>
@@ -998,6 +1007,118 @@ async function publishBusEvent() {
   }
 }
 
+// 9. SETTINGS & FLEET PROVISIONING
+async function loadSettings() {
+  try {
+    const s = await api('/api/admin/settings');
+    el('settingPublicBaseUrl').value = s.publicBaseUrl || '';
+    el('settingRateLimit').value = s.rateLimitPerMinute || 120;
+    el('settingCacheTtl').value = s.cacheTtlSeconds || 60;
+    el('settingLogRequests').value = s.logRequests ? 'true' : 'false';
+
+    el('settingClientsFile').textContent = s.clientsFile || './clients.json';
+    el('settingServicesFile').textContent = s.servicesFile || './services.json';
+    el('settingAssetCacheDir').textContent = s.assetCacheDir || './.cache/assets';
+    el('settingAuditLogFile').textContent = s.auditLogFile || './.cache/audit.jsonl';
+
+    el('settingTokensCount').textContent = `${s.githubTokensCount} Token${s.githubTokensCount > 1 ? 's' : ''} Active`;
+    el('settingGithubApiUrl').textContent = s.githubApiUrl;
+    el('settingWebhookStatus').textContent = s.webhookConfigured ? 'Configured (Active)' : 'Not Set (Optional)';
+  } catch (e) {
+    toast(e.message, 'danger');
+  }
+}
+
+async function saveSettings() {
+  const publicBaseUrl = el('settingPublicBaseUrl').value.trim();
+  const rateLimitPerMinute = parseInt(el('settingRateLimit').value, 10);
+  const cacheTtlSeconds = parseInt(el('settingCacheTtl').value, 10);
+  const logRequests = el('settingLogRequests').value === 'true';
+
+  try {
+    await api('/api/admin/settings', {
+      method: 'PUT',
+      body: { publicBaseUrl, rateLimitPerMinute, cacheTtlSeconds, logRequests },
+    });
+    toast('Settings saved successfully!', 'success');
+  } catch (e) {
+    toast(e.message, 'danger');
+  }
+}
+
+// Fleet Provisioning Modal
+function openProvisionFleetModal() {
+  el('fleetResultsContainer').classList.add('hidden');
+  el('modalProvisionFleet').classList.remove('hidden');
+  el('fleetOrgInput').focus();
+}
+
+function closeProvisionFleetModal() {
+  el('modalProvisionFleet').classList.add('hidden');
+}
+
+let lastFleetEnv = '';
+
+async function executeFleetProvision() {
+  const org = el('fleetOrgInput').value.trim() || 'merlinthedev848';
+  const overwrite = el('chkFleetOverwrite').checked;
+
+  const btn = el('btnExecuteFleetProvision');
+  btn.disabled = true;
+  btn.textContent = 'Provisioning...';
+
+  try {
+    const res = await api('/api/admin/fleet/provision', {
+      method: 'POST',
+      body: { org, overwrite },
+    });
+
+    lastFleetEnv = res.envText;
+    el('fleetEnvCode').textContent = res.envText;
+
+    const tbody = el('fleetProvisionTableBody');
+    tbody.innerHTML = res.provisioned.map((p) => `
+      <tr>
+        <td><strong>${escapeHtml(p.name)}</strong><br><span class="text-secondary text-xs">${escapeHtml(p.description)}</span></td>
+        <td>${p.permissions.map((perm) => `<span class="badge text-xs">${escapeHtml(perm)}</span>`).join(' ')}</td>
+        <td><code>${escapeHtml(p.repos.join(', '))}</code></td>
+        <td><code>${p.key.startsWith('(') ? `<span class="text-muted">${escapeHtml(p.key)}</span>` : escapeHtml(p.key.slice(0, 16) + '...')}</code></td>
+        <td>
+          ${p.key.startsWith('(') ? '—' : `<button class="btn-sm btn-outline btn-copy-single-key" data-key="${escapeHtml(p.key)}">Copy</button>`}
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('.btn-copy-single-key').forEach((b) => {
+      b.onclick = () => {
+        navigator.clipboard.writeText(b.dataset.key);
+        flashCopyButton(b);
+        toast('Key copied!', 'success');
+      };
+    });
+
+    el('fleetResultsContainer').classList.remove('hidden');
+    toast(`Provisioned ${res.provisioned.length} MSuite products successfully!`, 'success');
+    loadClients();
+  } catch (e) {
+    toast(e.message, 'danger');
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = '<span>⚡</span> Provision Entire Fleet';
+  }
+}
+
+function downloadFleetEnv() {
+  if (!lastFleetEnv) return;
+  const blob = new Blob([lastFleetEnv], { type: 'text/plain' });
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(blob);
+  a.download = '.env.msuite';
+  a.click();
+  URL.revokeObjectURL(a.href);
+  toast('Downloaded .env.msuite!', 'success');
+}
+
 // Event Listeners setup
 function setupEventListeners() {
   // Login
@@ -1017,6 +1138,7 @@ function setupEventListeners() {
       el('modalAddClient').classList.add('hidden');
       el('modalKeyDisplay').classList.add('hidden');
       el('modalAddService')?.classList.add('hidden');
+      el('modalProvisionFleet')?.classList.add('hidden');
       if (state.adminToken) hideAdminLoginModal();
     }
   });
@@ -1229,6 +1351,26 @@ function setupEventListeners() {
     flashCopyButton(el('btnCopyWebhookUrl'));
     toast('Webhook URL copied!', 'success');
   };
+
+  // Fleet Provisioning Modal & Onboarding
+  if (el('btnOpenProvisionFleetModal')) el('btnOpenProvisionFleetModal').onclick = openProvisionFleetModal;
+  if (el('btnHeroProvisionFleet')) el('btnHeroProvisionFleet').onclick = openProvisionFleetModal;
+  if (el('btnHeroAddClient')) el('btnHeroAddClient').onclick = () => el('btnOpenAddClientModal').click();
+  if (el('btnCloseProvisionFleetModal')) el('btnCloseProvisionFleetModal').onclick = closeProvisionFleetModal;
+  if (el('btnCloseFleetModalBottom')) el('btnCloseFleetModalBottom').onclick = closeProvisionFleetModal;
+  if (el('btnExecuteFleetProvision')) el('btnExecuteFleetProvision').onclick = executeFleetProvision;
+  if (el('btnCopyFleetEnv')) {
+    el('btnCopyFleetEnv').onclick = () => {
+      if (!lastFleetEnv) return;
+      navigator.clipboard.writeText(lastFleetEnv);
+      flashCopyButton(el('btnCopyFleetEnv'));
+      toast('Fleet keys copied (.env format)!', 'success');
+    };
+  }
+  if (el('btnDownloadFleetEnv')) el('btnDownloadFleetEnv').onclick = downloadFleetEnv;
+
+  // Settings
+  if (el('btnSaveSettings')) el('btnSaveSettings').onclick = saveSettings;
 }
 
 // Bootstrap

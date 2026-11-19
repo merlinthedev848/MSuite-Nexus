@@ -1066,3 +1066,79 @@ input[type="text"]:focus, input[type="password"]:focus, select.form-input:focus 
 .p-2 { padding: 0.5rem; }
 .p-4 { padding: 1rem; }
 .hidden { display: none !important; }
+
+/* PORTAL CONFIGURATION ENHANCEMENTS */
+.modal-card.modal-lg {
+  max-width: 840px;
+}
+.action-buttons-group {
+  display: flex;
+  gap: 0.75rem;
+  align-items: center;
+}
+.fleet-input-row {
+  display: flex;
+  gap: 1rem;
+  align-items: flex-start;
+  flex-wrap: wrap;
+}
+.settings-grid {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+}
+.settings-form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 1.25rem;
+}
+.settings-row-2 {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+}
+@media (max-width: 768px) {
+  .settings-row-2 {
+    grid-template-columns: 1fr;
+  }
+}
+.info-block-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.75rem;
+}
+.info-item {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 0.85rem;
+  border-bottom: 1px solid #131c30;
+  padding-bottom: 0.5rem;
+}
+.hero-onboard-card {
+  background: linear-gradient(135deg, rgba(88, 28, 135, 0.25), rgba(30, 58, 138, 0.25));
+  border: 1px solid rgba(59, 130, 246, 0.3);
+  border-radius: 10px;
+  padding: 1.5rem;
+  margin-bottom: 1.5rem;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
+}
+.hero-onboard-content h3 {
+  margin: 0 0 0.4rem 0;
+  font-size: 1.15rem;
+  color: #fff;
+}
+.hero-onboard-content p {
+  margin: 0;
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  line-height: 1.4;
+}
+.hero-onboard-actions {
+  display: flex;
+  gap: 0.75rem;
+  white-space: nowrap;
+}

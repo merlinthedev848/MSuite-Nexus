@@ -454,5 +454,173 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
     }
   });
 
+  // --- MSuite Fleet 1-Click Provisioning via Portal ---
+  router.post('/fleet/provision', async (req, res) => {
+    try {
+      const org = req.body?.org ? String(req.body.org).trim() : 'merlinthedev848';
+      const overwrite = Boolean(req.body?.overwrite);
+
+      const FLEET_DEFINITIONS = [
+        {
+          name: 'msuite-fleet-universal',
+          description: 'Universal Master Key for all MSuite Products',
+          repos: [`${org}/*`],
+          permissions: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+        {
+          name: 'msuite-sip',
+          description: 'MSuite SIP Desktop & VoIP Client',
+          repos: [`${org}/MSuite-SIP`],
+          permissions: ['releases', 'raw', 'services'],
+        },
+        {
+          name: 'msuite-sentinel',
+          description: 'MSuite Sentinel Security Agent',
+          repos: [`${org}/MSuite-Sentinel`],
+          permissions: ['releases', 'raw', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+        {
+          name: 'msuite-honeypot',
+          description: 'MSuite HoneyPot Threat Sensor',
+          repos: [`${org}/MSuite-HoneyPot`],
+          permissions: ['releases', 'raw', 'services', 'bus:publish'],
+        },
+        {
+          name: 'msuite-mstream',
+          description: 'MSuite Media & Streaming Core',
+          repos: [`${org}/MStream`],
+          permissions: ['releases', 'raw', 'archive', 'services'],
+        },
+        {
+          name: 'msuite-nexus',
+          description: 'MSuite Nexus Central Gateway & Exchange',
+          repos: [`${org}/MSuite-Nexus`],
+          permissions: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+      ];
+
+      const provisioned = [];
+      const publicUrl = config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+      let envText = `# MSuite Products Fleet Configuration\n# Generated via Nexus Portal: ${new Date().toISOString()}\nMSUITE_NEXUS_URL=${publicUrl}\n\n`;
+
+      for (const def of FLEET_DEFINITIONS) {
+        let key;
+        const existing = clients.getClient(def.name);
+        if (existing) {
+          if (overwrite) {
+            const rot = clients.rotateKey(def.name);
+            key = rot.key;
+            clients.updateClient(def.name, {
+              repos: def.repos,
+              permissions: def.permissions,
+              description: def.description,
+              disabled: false,
+            });
+          } else {
+            key = '(Retained existing key - select Overwrite to regenerate)';
+            clients.updateClient(def.name, {
+              repos: def.repos,
+              permissions: def.permissions,
+              description: def.description,
+            });
+          }
+        } else {
+          const added = clients.addClient({
+            name: def.name,
+            description: def.description,
+            repos: def.repos,
+            permissions: def.permissions,
+            allowedIps: ['*'],
+          });
+          key = added.key;
+        }
+
+        const envVar = def.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY';
+        if (!key.startsWith('(')) {
+          envText += `# ${def.description}\n${envVar}=${key}\n`;
+        } else {
+          envText += `# ${def.description}\n# ${envVar}=<existing_key>\n`;
+        }
+
+        provisioned.push({
+          name: def.name,
+          description: def.description,
+          repos: def.repos,
+          permissions: def.permissions,
+          key,
+          isNew: !existing || overwrite,
+        });
+      }
+
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'FLEET_PROVISIONED', details: { org, count: provisioned.length } });
+      events?.broadcast('client_change', { action: 'fleet_provision' });
+
+      res.json({
+        ok: true,
+        org,
+        provisioned,
+        envText,
+      });
+    } catch (e) {
+      res.status(500).json({ error: 'server_error', message: e.message });
+    }
+  });
+
+  // --- Portal Runtime Server Settings ---
+  router.get('/settings', (req, res) => {
+    const rateLimits = github?.getRateLimits?.() || null;
+    res.json({
+      ok: true,
+      publicBaseUrl: config.publicBaseUrl || '',
+      port: config.port,
+      host: config.host || '0.0.0.0',
+      trustProxy: Boolean(config.trustProxy),
+      logRequests: Boolean(config.logRequests),
+      rateLimitPerMinute: config.rateLimitPerMinute || 120,
+      cacheTtlSeconds: Math.round((config.cacheTtlMs || 60000) / 1000),
+      cacheMaxEntries: config.cacheMaxEntries || 500,
+      assetCacheEnabled: Boolean(config.assetCacheEnabled),
+      assetCacheDir: config.assetCacheDir || '',
+      assetCacheMaxBytes: config.assetCacheMaxBytes || 0,
+      webhookConfigured: Boolean(config.webhookSecret),
+      githubApiUrl: config.githubApiUrl || 'https://api.github.com',
+      githubTokensCount: config.githubTokens?.length || (config.githubToken ? 1 : 0),
+      githubRateLimits: rateLimits,
+      clientsFile: config.clientsFile || './clients.json',
+      servicesFile: config.servicesFile || './services.json',
+      auditLogFile: config.auditLogFile || './.cache/audit.jsonl',
+    });
+  });
+
+  router.put('/settings', (req, res) => {
+    const { publicBaseUrl, rateLimitPerMinute, logRequests, cacheTtlSeconds } = req.body || {};
+    if (publicBaseUrl !== undefined) {
+      config.publicBaseUrl = String(publicBaseUrl).trim().replace(/\/+$/, '');
+    }
+    if (rateLimitPerMinute !== undefined && Number.isFinite(Number(rateLimitPerMinute)) && Number(rateLimitPerMinute) > 0) {
+      config.rateLimitPerMinute = Number(rateLimitPerMinute);
+    }
+    if (logRequests !== undefined) {
+      config.logRequests = Boolean(logRequests);
+    }
+    if (cacheTtlSeconds !== undefined && Number.isFinite(Number(cacheTtlSeconds)) && Number(cacheTtlSeconds) > 0) {
+      config.cacheTtlMs = Number(cacheTtlSeconds) * 1000;
+    }
+
+    audit?.record({ actor: 'admin', ip: req.ip, action: 'SETTINGS_UPDATED', details: { publicBaseUrl, rateLimitPerMinute, logRequests } });
+    events?.broadcast('settings_change', { time: new Date().toISOString() });
+
+    res.json({
+      ok: true,
+      message: 'Server settings updated successfully',
+      settings: {
+        publicBaseUrl: config.publicBaseUrl,
+        rateLimitPerMinute: config.rateLimitPerMinute,
+        logRequests: config.logRequests,
+        cacheTtlSeconds: Math.round(config.cacheTtlMs / 1000),
+      },
+    });
+  });
+
   return router;
 }

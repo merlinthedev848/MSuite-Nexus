@@ -78,12 +78,31 @@
       <button class="tab-btn" data-tab="diagnostics">
         <span class="tab-icon">🛠️</span> Diagnostics &amp; Cache
       </button>
+      <button class="tab-btn" data-tab="settings">
+        <span class="tab-icon">⚙️</span> Server Settings
+      </button>
     </nav>
 
     <!-- Main Container -->
     <main class="content-container">
       <!-- 1. OVERVIEW TAB -->
       <section id="tab-overview" class="tab-content active">
+        <!-- Onboarding Hero Banner (Visible when fleet is unconfigured) -->
+        <div id="onboardingHeroCard" class="hero-onboard-card hidden">
+          <div class="hero-onboard-content">
+            <h3>🚀 Welcome to MSuite Nexus Portal!</h3>
+            <p>Your universal gateway &amp; exchange is running, but no client applications are configured yet. Provision your entire fleet in one click or create custom API keys below.</p>
+          </div>
+          <div class="hero-onboard-actions">
+            <button class="btn btn-primary" id="btnHeroProvisionFleet" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: none;">
+              <span>⚡</span> 1-Click Provision Fleet
+            </button>
+            <button class="btn btn-outline" id="btnHeroAddClient">
+              <span>+</span> Add Custom Key
+            </button>
+          </div>
+        </div>
+
         <div class="metrics-grid">
           <div class="card stat-card">
             <div class="stat-header">
@@ -224,9 +243,14 @@
           <div class="search-bar">
             <input type="text" id="clientSearchInput" placeholder="Filter clients by name, repo, or IP...">
           </div>
-          <button class="btn btn-primary" id="btnOpenAddClientModal">
-            <span>+</span> New Client Key
-          </button>
+          <div class="action-buttons-group">
+            <button class="btn btn-secondary" id="btnOpenProvisionFleetModal" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: none; font-weight: 600;">
+              <span>🚀</span> 1-Click Provision Fleet
+            </button>
+            <button class="btn btn-primary" id="btnOpenAddClientModal">
+              <span>+</span> New Client Key
+            </button>
+          </div>
         </div>
 
         <div class="card">
@@ -649,7 +673,172 @@
           </div>
         </div>
       </section>
+
+      <!-- 9. SETTINGS TAB -->
+      <section id="tab-settings" class="tab-content">
+        <div class="settings-grid">
+          <div class="card full-width-card">
+            <div class="card-header">
+              <div>
+                <h3>Server &amp; Gateway Settings</h3>
+                <p class="text-secondary text-xs">Manage runtime parameters directly in the portal without restarting or touching CLI.</p>
+              </div>
+              <button class="btn btn-primary" id="btnSaveSettings">Save Settings</button>
+            </div>
+
+            <div class="settings-form-grid mt-3">
+              <div class="form-group">
+                <label class="form-label" for="settingPublicBaseUrl">Public Base URL</label>
+                <input type="text" id="settingPublicBaseUrl" class="form-input" placeholder="https://nexus.example.com">
+                <span class="form-hint">Public gateway address used in rewritten asset URLs and SDK connections.</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="settingRateLimit">Default Rate Limit (Requests / Min)</label>
+                <input type="number" id="settingRateLimit" class="form-input" min="10" max="100000" placeholder="120">
+                <span class="form-hint">Global fallback rate limit per minute per client key.</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="settingCacheTtl">Metadata Cache TTL (Seconds)</label>
+                <input type="number" id="settingCacheTtl" class="form-input" min="5" max="86400" placeholder="60">
+                <span class="form-hint">TTL duration for cached GitHub release &amp; repo metadata.</span>
+              </div>
+
+              <div class="form-group">
+                <label class="form-label" for="settingLogRequests">Request Logging</label>
+                <select id="settingLogRequests" class="form-input">
+                  <option value="true">Enabled (Log requests &amp; stream to UI)</option>
+                  <option value="false">Disabled (Quiet mode)</option>
+                </select>
+                <span class="form-hint">Toggle live telemetry and stdout logging.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="settings-row-2">
+            <!-- Storage & Paths -->
+            <div class="card">
+              <div class="card-header">
+                <h3>Storage &amp; Persistence Paths</h3>
+                <span class="badge">Local State</span>
+              </div>
+              <div class="info-block-list mt-2">
+                <div class="info-item">
+                  <span class="info-label">Clients Store:</span>
+                  <code id="settingClientsFile">./clients.json</code>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Services Registry:</span>
+                  <code id="settingServicesFile">./services.json</code>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Asset NVMe Cache:</span>
+                  <code id="settingAssetCacheDir">./.cache/assets</code>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Audit Log:</span>
+                  <code id="settingAuditLogFile">./.cache/audit.jsonl</code>
+                </div>
+              </div>
+            </div>
+
+            <!-- GitHub Upstream Connection -->
+            <div class="card">
+              <div class="card-header">
+                <h3>GitHub Upstream Connection</h3>
+                <span class="badge badge-success" id="settingTokensCount">1 Token Active</span>
+              </div>
+              <div class="info-block-list mt-2">
+                <div class="info-item">
+                  <span class="info-label">API Gateway:</span>
+                  <code id="settingGithubApiUrl">https://api.github.com</code>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Failover Pool:</span>
+                  <span id="settingPoolStatus" class="text-emerald">Active &amp; Operational</span>
+                </div>
+                <div class="info-item">
+                  <span class="info-label">Webhook Secret:</span>
+                  <span id="settingWebhookStatus">Configured</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
     </main>
+
+    <!-- MODAL: 1-CLICK FLEET PROVISIONING -->
+    <div class="modal-backdrop hidden" id="modalProvisionFleet">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <h3 style="display:flex; align-items:center; gap:8px;">
+            <span>🚀</span> 1-Click Provision MSuite Fleet
+          </h3>
+          <button class="modal-close" id="btnCloseProvisionFleetModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-secondary text-sm">
+            Automatically generate and configure scoped API keys for all MSuite products (Universal Master, SIP, Sentinel, HoneyPot, MStream, and Nexus) without touching any CLI commands.
+          </p>
+
+          <div class="fleet-input-row mt-3">
+            <div class="form-group" style="flex:1; min-width:260px;">
+              <label class="form-label" for="fleetOrgInput">GitHub Organization / Account Owner *</label>
+              <input type="text" id="fleetOrgInput" class="form-input" value="merlinthedev848" placeholder="e.g. merlinthedev848">
+              <span class="form-hint">Used to construct repository allow-lists (e.g. <code>merlinthedev848/MSuite-SIP</code>).</span>
+            </div>
+            <div class="form-group" style="padding-top:28px;">
+              <label class="checkbox-pill">
+                <input type="checkbox" id="chkFleetOverwrite">
+                <span>Rotate existing keys</span>
+              </label>
+            </div>
+            <div class="form-group" style="padding-top:24px;">
+              <button class="btn btn-primary" id="btnExecuteFleetProvision">
+                <span>⚡</span> Provision Entire Fleet
+              </button>
+            </div>
+          </div>
+
+          <div id="fleetResultsContainer" class="hidden mt-4">
+            <div class="alert-box alert-success mb-3">
+              ✅ <strong>Fleet Successfully Provisioned!</strong> All MSuite client keys are now active in Nexus. Copy the environment variables below or download <code>.env.msuite</code>.
+            </div>
+
+            <div class="table-responsive">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Permissions</th>
+                    <th>Repository Access</th>
+                    <th>API Key</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="fleetProvisionTableBody"></tbody>
+              </table>
+            </div>
+
+            <div class="mt-4">
+              <div class="card-header" style="padding:0 0 8px 0;">
+                <label class="form-label" style="font-weight:600;">Unified Fleet .env Configuration</label>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn-sm btn-outline" id="btnCopyFleetEnv">📋 Copy All Keys (.env)</button>
+                  <button class="btn-sm btn-primary" id="btnDownloadFleetEnv">💾 Download .env.msuite</button>
+                </div>
+              </div>
+              <pre class="snippet-pre"><code id="fleetEnvCode"></code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn btn-ghost" id="btnCloseFleetModalBottom">Close</button>
+        </div>
+      </div>
+    </div>
 
     <!-- MODAL: ADD CLIENT -->
     <div class="modal-backdrop hidden" id="modalAddClient">

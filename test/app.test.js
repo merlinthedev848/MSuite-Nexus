@@ -601,3 +601,56 @@ test('MessageBus: publish events, history, and topic isolation', async () => {
   assert.equal(adminBus.enabled, true);
   assert.ok(adminBus.stats.topics.includes('alerts.threat'));
 });
+
+test('Portal 1-Click Fleet Provisioning (/api/admin/fleet/provision)', async () => {
+  const res = await adminReq('/api/admin/fleet/provision', 'POST', {
+    org: 'merlinthedev848',
+    overwrite: true,
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.org, 'merlinthedev848');
+  assert.ok(Array.isArray(data.provisioned));
+  assert.equal(data.provisioned.length, 6); // Universal, SIP, Sentinel, HoneyPot, MStream, Nexus
+
+  // Verify universal master key
+  const universal = data.provisioned.find((p) => p.name === 'msuite-fleet-universal');
+  assert.ok(universal);
+  assert.ok(universal.key.startsWith('msk_'));
+  assert.deepEqual(universal.repos, ['merlinthedev848/*']);
+
+  // Verify SIP key
+  const sip = data.provisioned.find((p) => p.name === 'msuite-sip');
+  assert.ok(sip);
+  assert.ok(sip.key.startsWith('msk_'));
+  assert.deepEqual(sip.repos, ['merlinthedev848/MSuite-SIP']);
+
+  // Verify generated .env text includes all product keys
+  assert.ok(data.envText.includes('MSUITE_FLEET_UNIVERSAL_KEY=msk_'));
+  assert.ok(data.envText.includes('MSUITE_SIP_KEY=msk_'));
+  assert.ok(data.envText.includes('MSUITE_SENTINEL_KEY=msk_'));
+});
+
+test('Portal Runtime Server Settings (/api/admin/settings)', async () => {
+  // 1. Fetch current settings
+  const getRes = await adminReq('/api/admin/settings');
+  assert.equal(getRes.status, 200);
+  const settings = await getRes.json();
+  assert.equal(settings.ok, true);
+  assert.equal(typeof settings.rateLimitPerMinute, 'number');
+  assert.equal(typeof settings.cacheTtlSeconds, 'number');
+  assert.ok(settings.clientsFile);
+
+  // 2. Update settings via Portal
+  const putRes = await adminReq('/api/admin/settings', 'PUT', {
+    publicBaseUrl: 'https://nexus.custom-portal.org',
+    rateLimitPerMinute: 500,
+    logRequests: false,
+  });
+  assert.equal(putRes.status, 200);
+  const putData = await putRes.json();
+  assert.equal(putData.ok, true);
+  assert.equal(putData.settings.publicBaseUrl, 'https://nexus.custom-portal.org');
+  assert.equal(putData.settings.rateLimitPerMinute, 500);
+});

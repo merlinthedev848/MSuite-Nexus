@@ -62,17 +62,25 @@ ADMIN_TOKEN=msuite_secret_admin_token
 PUBLIC_BASE_URL=https://code.example.com
 ```
 
-### 3. Generate a Client API Key
-Generate keys via the **Web UI** or via CLI:
-```bash
-npm run new-key -- msuite-sip merlinthedev848/MSuite-SIP --perms releases
-```
-
-### 4. Start the Service
+### 3. Start the Service & Open the Portal
 ```bash
 npm start
 ```
-Access the dashboard at `http://localhost:8080/`.
+Open **`http://localhost:8080/`** in your browser.
+
+---
+
+## 🖥️ 100% Portal-Configured (Zero CLI Required)
+
+**Nothing in MSuite Nexus requires CLI configuration.** All operations, fleet management, and governance are built directly into the Web Portal:
+
+- 🚀 **1-Click Fleet Auto-Provisioning**: Click the **1-Click Provision Fleet** button in the Portal to generate scoped API keys for the entire MSuite ecosystem (`Universal Master`, `MSuite-SIP`, `MSuite-Sentinel`, `MSuite-HoneyPot`, `MStream`, and `MSuite-Nexus`). Copy all keys or download `.env.msuite` with one click.
+- 🔑 **Client Key Governance**: Create, rotate, enable/disable, and delete client keys. Restrict keys to specific IPv4 CIDR ranges and configure expiration deadlines.
+- 🌐 **Service Gateway Registry**: Dynamically add, edit, test ping, and remove upstream backend microservices with automatic credential injection.
+- ⚡ **Message Bus Explorer**: Monitor active SSE subscribers, view live topic event feeds, and dispatch admin announcements.
+- ⚙️ **Server Settings & Limits**: Adjust public URLs, default client rate limits, metadata cache TTL, and logging on the fly without server restarts.
+- 🧪 **Interactive API Sandbox**: Execute test requests, simulate client identities, and inspect real-time latency and headers in the browser.
+- 🛡️ **Audit Trail**: Search and filter the immutable administrative ledger directly in the dashboard.
 
 ---
 
