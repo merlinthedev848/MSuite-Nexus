@@ -654,3 +654,68 @@ test('Portal Runtime Server Settings (/api/admin/settings)', async () => {
   assert.equal(putData.settings.publicBaseUrl, 'https://nexus.custom-portal.org');
   assert.equal(putData.settings.rateLimitPerMinute, 500);
 });
+
+test('Setup Wizard: test-github connection probe', async () => {
+  // Probe with valid mock token
+  const res = await adminReq('/api/admin/wizard/test-github', 'POST', {
+    token: TOKEN,
+  });
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.user.login, 'merlinthedev848');
+
+  // Probe without token uses configured upstream token
+  const resDefault = await adminReq('/api/admin/wizard/test-github', 'POST', {});
+  assert.equal(resDefault.status, 200);
+  const dataDefault = await resDefault.json();
+  assert.equal(dataDefault.ok, true);
+});
+
+test('Setup Wizard: complete end-to-end multi-step onboarding', async () => {
+  const wizardPayload = {
+    publicBaseUrl: 'https://nexus.enterprise.internal',
+    adminToken: 'msuite_adm_custom_wizard_token_999',
+    rateLimitPerMinute: 300,
+    org: 'merlinthedev848',
+    products: {
+      universal: true,
+      sip: true,
+      sentinel: true,
+      honeypot: false, // selectively omit honeypot
+      mstream: true,
+      nexus: true,
+    },
+    service: {
+      enabled: true,
+      id: 'telemetry-wiz',
+      name: 'Sentinel Telemetry Wizard',
+      target: 'http://127.0.0.1:8001',
+      authHeader: 'Bearer secret_wiz_token',
+    },
+  };
+
+  const res = await adminReq('/api/admin/wizard/complete', 'POST', wizardPayload);
+  assert.equal(res.status, 200);
+  const data = await res.json();
+  assert.equal(data.ok, true);
+  assert.equal(data.publicBaseUrl, 'https://nexus.enterprise.internal');
+  assert.equal(data.adminToken, 'msuite_adm_custom_wizard_token_999');
+
+  // Verify provisioned products: 5 provisioned (honeypot was omitted)
+  assert.equal(data.provisioned.length, 5);
+  const names = data.provisioned.map((p) => p.name);
+  assert.ok(names.includes('msuite-fleet-universal'));
+  assert.ok(names.includes('msuite-sip'));
+  assert.ok(names.includes('msuite-sentinel'));
+  assert.ok(names.includes('msuite-mstream'));
+  assert.ok(names.includes('msuite-nexus'));
+  assert.ok(!names.includes('msuite-honeypot'));
+
+  // Verify service was registered
+  assert.ok(data.registeredService);
+  assert.equal(data.registeredService.id, 'telemetry-wiz');
+
+  // Reset admin token back for remaining tests / suite teardown
+  await adminReq('/api/admin/settings', 'PUT', { publicBaseUrl: 'https://proxy.example' }, 'msuite_adm_custom_wizard_token_999');
+});

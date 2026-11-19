@@ -1119,6 +1119,212 @@ function downloadFleetEnv() {
   toast('Downloaded .env.msuite!', 'success');
 }
 
+// 10. INTERACTIVE SETUP WIZARD
+let wizardCurrentStep = 1;
+let lastWizardEnv = '';
+
+async function openSetupWizard() {
+  wizardCurrentStep = 1;
+  updateWizardUI();
+  if (el('wizardGithubTestResult')) el('wizardGithubTestResult').innerHTML = '';
+  el('modalSetupWizard').classList.remove('hidden');
+
+  try {
+    const s = await api('/api/admin/settings');
+    if (s.publicBaseUrl) el('wizardPublicUrl').value = s.publicBaseUrl;
+    else if (!el('wizardPublicUrl').value) el('wizardPublicUrl').value = window.location.origin;
+
+    if (s.rateLimitPerMinute) el('wizardRateLimit').value = s.rateLimitPerMinute;
+    el('wizardAdminToken').value = state.adminToken || '';
+  } catch {}
+}
+
+function closeSetupWizard() {
+  el('modalSetupWizard').classList.add('hidden');
+}
+
+function updateWizardUI() {
+  for (let i = 1; i <= 5; i++) {
+    const ind = el(`wizStepInd${i}`);
+    const pane = el(`wizardPane${i}`);
+    if (ind) {
+      ind.classList.remove('active', 'completed');
+      if (i === wizardCurrentStep) ind.classList.add('active');
+      else if (i < wizardCurrentStep) ind.classList.add('completed');
+    }
+    if (pane) {
+      if (i === wizardCurrentStep) pane.classList.add('active');
+      else pane.classList.remove('active');
+    }
+  }
+
+  const prevBtn = el('btnWizardPrev');
+  const nextBtn = el('btnWizardNext');
+  const finishBtn = el('btnWizardFinish');
+  const skipBtn = el('btnWizardSkip');
+
+  if (wizardCurrentStep === 1) {
+    prevBtn.style.visibility = 'hidden';
+    nextBtn.textContent = 'Next: GitHub Token →';
+    nextBtn.classList.remove('hidden');
+    finishBtn.classList.add('hidden');
+    skipBtn.classList.remove('hidden');
+  } else if (wizardCurrentStep === 2) {
+    prevBtn.style.visibility = 'visible';
+    nextBtn.textContent = 'Next: Fleet Keys →';
+    nextBtn.classList.remove('hidden');
+    finishBtn.classList.add('hidden');
+    skipBtn.classList.remove('hidden');
+  } else if (wizardCurrentStep === 3) {
+    prevBtn.style.visibility = 'visible';
+    nextBtn.textContent = 'Next: Service Gateway →';
+    nextBtn.classList.remove('hidden');
+    finishBtn.classList.add('hidden');
+    skipBtn.classList.remove('hidden');
+  } else if (wizardCurrentStep === 4) {
+    prevBtn.style.visibility = 'visible';
+    nextBtn.textContent = 'Finish & Initialize Fleet ⚡';
+    nextBtn.classList.remove('hidden');
+    finishBtn.classList.add('hidden');
+    skipBtn.classList.remove('hidden');
+  } else if (wizardCurrentStep === 5) {
+    prevBtn.style.visibility = 'hidden';
+    nextBtn.classList.add('hidden');
+    finishBtn.classList.remove('hidden');
+    skipBtn.classList.add('hidden');
+  }
+}
+
+async function testWizardGithub() {
+  const token = el('wizardGithubToken').value.trim();
+  const resEl = el('wizardGithubTestResult');
+  resEl.innerHTML = '<span class="text-secondary">Testing connection...</span>';
+
+  try {
+    const data = await api('/api/admin/wizard/test-github', {
+      method: 'POST',
+      body: { token },
+    });
+
+    if (data.ok) {
+      resEl.innerHTML = `<span class="text-emerald">✓ Connected successfully to GitHub! Authenticated as <strong>${escapeHtml(data.user?.login || 'PAT User')}</strong> (Quota remaining: ${data.rateLimit?.remaining ?? '5000'})</span>`;
+    } else {
+      resEl.innerHTML = `<span class="text-danger">⚠️ ${escapeHtml(data.error || 'Connection failed')}</span>`;
+    }
+  } catch (e) {
+    resEl.innerHTML = `<span class="text-danger">⚠️ ${escapeHtml(e.message)}</span>`;
+  }
+}
+
+async function handleWizardNext() {
+  if (wizardCurrentStep === 1) {
+    const url = el('wizardPublicUrl').value.trim();
+    if (!url) return toast('Public Base URL is required', 'warning');
+    wizardCurrentStep = 2;
+    updateWizardUI();
+  } else if (wizardCurrentStep === 2) {
+    const org = el('wizardGithubOrg').value.trim();
+    if (!org) return toast('GitHub Organization / Owner is required', 'warning');
+    wizardCurrentStep = 3;
+    updateWizardUI();
+  } else if (wizardCurrentStep === 3) {
+    wizardCurrentStep = 4;
+    updateWizardUI();
+  } else if (wizardCurrentStep === 4) {
+    await finishWizardSetup();
+  }
+}
+
+function handleWizardPrev() {
+  if (wizardCurrentStep > 1 && wizardCurrentStep < 5) {
+    wizardCurrentStep--;
+    updateWizardUI();
+  }
+}
+
+async function finishWizardSetup() {
+  const nextBtn = el('btnWizardNext');
+  nextBtn.disabled = true;
+  nextBtn.textContent = 'Configuring Nexus...';
+
+  try {
+    const publicBaseUrl = el('wizardPublicUrl').value.trim();
+    const adminToken = el('wizardAdminToken').value.trim();
+    const rateLimitPerMinute = parseInt(el('wizardRateLimit').value, 10);
+    const org = el('wizardGithubOrg').value.trim() || 'merlinthedev848';
+    const githubToken = el('wizardGithubToken').value.trim();
+
+    const products = {
+      universal: el('wizProdUniversal').checked,
+      sip: el('wizProdSip').checked,
+      sentinel: el('wizProdSentinel').checked,
+      honeypot: el('wizProdHoneypot').checked,
+      mstream: el('wizProdMstream').checked,
+      nexus: el('wizProdNexus').checked,
+    };
+
+    const enableService = el('wizEnableTelemetryService').checked;
+    const service = enableService ? {
+      enabled: true,
+      id: el('wizServiceId').value.trim(),
+      target: el('wizServiceTarget').value.trim(),
+      authHeader: el('wizServiceAuth').value.trim(),
+    } : null;
+
+    const res = await api('/api/admin/wizard/complete', {
+      method: 'POST',
+      body: {
+        publicBaseUrl,
+        adminToken,
+        rateLimitPerMinute,
+        org,
+        githubToken,
+        products,
+        service,
+      },
+    });
+
+    if (adminToken && adminToken !== state.adminToken) {
+      state.adminToken = adminToken;
+      localStorage.setItem('msuite_admin_token', adminToken);
+    }
+
+    lastWizardEnv = res.envText;
+    el('wizardEnvCode').textContent = res.envText;
+
+    const tbody = el('wizardResultsTableBody');
+    tbody.innerHTML = res.provisioned.map((p) => `
+      <tr>
+        <td><strong>${escapeHtml(p.name)}</strong></td>
+        <td>${p.permissions.map((perm) => `<span class="badge text-xs">${escapeHtml(perm)}</span>`).join(' ')}</td>
+        <td><code>${escapeHtml(p.key.slice(0, 16) + '...')}</code></td>
+        <td>
+          <button class="btn-sm btn-outline btn-copy-wiz-key" data-key="${escapeHtml(p.key)}">Copy</button>
+        </td>
+      </tr>
+    `).join('');
+
+    tbody.querySelectorAll('.btn-copy-wiz-key').forEach((b) => {
+      b.onclick = () => {
+        navigator.clipboard.writeText(b.dataset.key);
+        flashCopyButton(b);
+        toast('Key copied!', 'success');
+      };
+    });
+
+    localStorage.setItem('msuite_wizard_completed', 'true');
+    wizardCurrentStep = 5;
+    updateWizardUI();
+    toast('Setup completed successfully!', 'success');
+    loadClients();
+    loadOverview();
+  } catch (e) {
+    toast(e.message, 'danger');
+  } finally {
+    nextBtn.disabled = false;
+  }
+}
+
 // Event Listeners setup
 function setupEventListeners() {
   // Login
@@ -1139,6 +1345,7 @@ function setupEventListeners() {
       el('modalKeyDisplay').classList.add('hidden');
       el('modalAddService')?.classList.add('hidden');
       el('modalProvisionFleet')?.classList.add('hidden');
+      el('modalSetupWizard')?.classList.add('hidden');
       if (state.adminToken) hideAdminLoginModal();
     }
   });
@@ -1371,6 +1578,41 @@ function setupEventListeners() {
 
   // Settings
   if (el('btnSaveSettings')) el('btnSaveSettings').onclick = saveSettings;
+
+  // Interactive Setup Wizard
+  if (el('btnOpenSetupWizard')) el('btnOpenSetupWizard').onclick = openSetupWizard;
+  if (el('btnHeroSetupWizard')) el('btnHeroSetupWizard').onclick = openSetupWizard;
+  if (el('btnCloseSetupWizard')) el('btnCloseSetupWizard').onclick = closeSetupWizard;
+  if (el('btnWizardSkip')) el('btnWizardSkip').onclick = closeSetupWizard;
+  if (el('btnWizardNext')) el('btnWizardNext').onclick = handleWizardNext;
+  if (el('btnWizardPrev')) el('btnWizardPrev').onclick = handleWizardPrev;
+  if (el('btnWizardFinish')) el('btnWizardFinish').onclick = closeSetupWizard;
+  if (el('btnWizardTestGithub')) el('btnWizardTestGithub').onclick = testWizardGithub;
+  if (el('btnWizardCopyEnv')) {
+    el('btnWizardCopyEnv').onclick = () => {
+      if (!lastWizardEnv) return;
+      navigator.clipboard.writeText(lastWizardEnv);
+      flashCopyButton(el('btnWizardCopyEnv'));
+      toast('All fleet keys copied to clipboard!', 'success');
+    };
+  }
+  if (el('btnWizardDownloadEnv')) {
+    el('btnWizardDownloadEnv').onclick = () => {
+      if (!lastWizardEnv) return;
+      const blob = new Blob([lastWizardEnv], { type: 'text/plain' });
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = '.env.msuite';
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast('Downloaded .env.msuite!', 'success');
+    };
+  }
+  if (el('wizEnableTelemetryService')) {
+    el('wizEnableTelemetryService').onchange = (e) => {
+      if (el('wizTelemetryConfigBox')) el('wizTelemetryConfigBox').classList.toggle('hidden', !e.target.checked);
+    };
+  }
 }
 
 // Bootstrap
@@ -1383,6 +1625,15 @@ window.addEventListener('DOMContentLoaded', () => {
   } else {
     initSSE();
     loadOverview();
+
+    // Auto-launch Setup Wizard on first portal visit if unconfigured
+    if (!localStorage.getItem('msuite_wizard_completed')) {
+      setTimeout(() => {
+        if (!state.clients || state.clients.length === 0) {
+          openSetupWizard();
+        }
+      }, 500);
+    }
   }
 
   setInterval(() => {

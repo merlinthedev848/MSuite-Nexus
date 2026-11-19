@@ -41,6 +41,7 @@
       </div>
 
       <div class="nav-actions">
+        <button id="btnOpenSetupWizard" class="btn-sm btn-primary" title="Launch Interactive Setup Wizard" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: none; font-weight: 600;">🧙‍♂️ Setup Wizard</button>
         <div id="authStatusPill" class="auth-pill">
           <span class="auth-user">Admin</span>
           <button id="btnSwitchToken" class="btn-sm btn-ghost" title="Change Admin Token">Switch Key</button>
@@ -94,7 +95,10 @@
             <p>Your universal gateway &amp; exchange is running, but no client applications are configured yet. Provision your entire fleet in one click or create custom API keys below.</p>
           </div>
           <div class="hero-onboard-actions">
-            <button class="btn btn-primary" id="btnHeroProvisionFleet" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: none;">
+            <button class="btn btn-primary" id="btnHeroSetupWizard" style="background: linear-gradient(135deg, #7c3aed, #2563eb); border: none;">
+              <span>🧙‍♂️</span> Launch Setup Wizard
+            </button>
+            <button class="btn btn-secondary" id="btnHeroProvisionFleet">
               <span>⚡</span> 1-Click Provision Fleet
             </button>
             <button class="btn btn-outline" id="btnHeroAddClient">
@@ -1008,6 +1012,222 @@
         <div class="modal-footer">
           <button class="btn btn-ghost" id="btnCancelLogin">Cancel</button>
           <button class="btn btn-primary" id="btnLoginSubmit">Authenticate</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: INTERACTIVE SETUP WIZARD -->
+    <div class="modal-backdrop hidden" id="modalSetupWizard">
+      <div class="modal-card modal-wizard">
+        <div class="modal-header wizard-header">
+          <div class="wizard-title-group">
+            <span class="wizard-icon">🧙‍♂️</span>
+            <div>
+              <h3>MSuite Nexus Setup Wizard</h3>
+              <p class="text-secondary text-xs">Complete portal-driven onboarding &amp; fleet initialization</p>
+            </div>
+          </div>
+          <button class="modal-close" id="btnCloseSetupWizard">&times;</button>
+        </div>
+
+        <!-- Wizard Step Indicator Progress Bar -->
+        <div class="wizard-progress-bar">
+          <div class="wizard-step active" id="wizStepInd1" data-step="1">
+            <div class="step-num">1</div>
+            <div class="step-label">Server &amp; Admin</div>
+          </div>
+          <div class="wizard-step-line"></div>
+          <div class="wizard-step" id="wizStepInd2" data-step="2">
+            <div class="step-num">2</div>
+            <div class="step-label">GitHub Token</div>
+          </div>
+          <div class="wizard-step-line"></div>
+          <div class="wizard-step" id="wizStepInd3" data-step="3">
+            <div class="step-num">3</div>
+            <div class="step-label">Fleet Keys</div>
+          </div>
+          <div class="wizard-step-line"></div>
+          <div class="wizard-step" id="wizStepInd4" data-step="4">
+            <div class="step-num">4</div>
+            <div class="step-label">Service Gateway</div>
+          </div>
+          <div class="wizard-step-line"></div>
+          <div class="wizard-step" id="wizStepInd5" data-step="5">
+            <div class="step-num">5</div>
+            <div class="step-label">Ready!</div>
+          </div>
+        </div>
+
+        <div class="modal-body wizard-body">
+          <!-- STEP 1: SERVER & ADMIN -->
+          <div class="wizard-pane active" id="wizardPane1">
+            <h4>Step 1: Gateway Identity &amp; Admin Security</h4>
+            <p class="text-secondary text-sm">
+              Configure how client applications will reach MSuite Nexus and verify administrative access credentials.
+            </p>
+            <div class="form-group mt-3">
+              <label class="form-label" for="wizardPublicUrl">Public Base URL *</label>
+              <input type="text" id="wizardPublicUrl" class="form-input" placeholder="http://localhost:8080 or https://nexus.example.com">
+              <span class="form-hint">The base URL your MSuite apps and background agents use to reach Nexus.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="wizardAdminToken">Admin Token</label>
+              <input type="text" id="wizardAdminToken" class="form-input" placeholder="msuite_adm_...">
+              <span class="form-hint">Master token required to access this portal. You can keep your active token or customize it.</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="wizardRateLimit">Default Rate Limit (Requests / Min)</label>
+              <input type="number" id="wizardRateLimit" class="form-input" value="120" min="10" max="100000">
+            </div>
+          </div>
+
+          <!-- STEP 2: GITHUB UPSTREAM -->
+          <div class="wizard-pane" id="wizardPane2">
+            <h4>Step 2: Upstream GitHub Token &amp; Organization</h4>
+            <p class="text-secondary text-sm">
+              Nexus securely bridges private GitHub repositories with your fleet without exposing tokens to clients.
+            </p>
+            <div class="form-group mt-3">
+              <label class="form-label" for="wizardGithubOrg">GitHub Organization / Account Owner *</label>
+              <input type="text" id="wizardGithubOrg" class="form-input" value="merlinthedev848" placeholder="e.g. merlinthedev848">
+              <span class="form-hint">Used for constructing repository paths (e.g. <code>merlinthedev848/MSuite-SIP</code>).</span>
+            </div>
+            <div class="form-group">
+              <label class="form-label" for="wizardGithubToken">GitHub Fine-Grained PAT (Optional if already configured)</label>
+              <input type="password" id="wizardGithubToken" class="form-input" placeholder="github_pat_... or ghp_...">
+              <span class="form-hint">Requires read-only "Contents" and "Metadata" permissions.</span>
+            </div>
+            <div class="form-group">
+              <button class="btn btn-outline" id="btnWizardTestGithub">
+                <span>🐙</span> Test GitHub Upstream Connection
+              </button>
+              <div id="wizardGithubTestResult" class="mt-2 text-sm"></div>
+            </div>
+          </div>
+
+          <!-- STEP 3: FLEET PROVISIONING -->
+          <div class="wizard-pane" id="wizardPane3">
+            <h4>Step 3: Provision MSuite Fleet Keys</h4>
+            <p class="text-secondary text-sm">
+              Choose which MSuite products to provision. Nexus will generate cryptographically secure keys for each.
+            </p>
+            <div class="fleet-select-list mt-3">
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdUniversal" checked>
+                <div class="fleet-item-info">
+                  <strong>Universal Master Key</strong>
+                  <span class="text-secondary text-xs">All repositories under organization &amp; all gateway permissions</span>
+                </div>
+              </label>
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdSip" checked>
+                <div class="fleet-item-info">
+                  <strong>MSuite-SIP</strong>
+                  <span class="text-secondary text-xs">VoIP &amp; Desktop client update channel + service access</span>
+                </div>
+              </label>
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdSentinel" checked>
+                <div class="fleet-item-info">
+                  <strong>MSuite-Sentinel</strong>
+                  <span class="text-secondary text-xs">Security monitoring agent + message bus pub/sub</span>
+                </div>
+              </label>
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdHoneypot" checked>
+                <div class="fleet-item-info">
+                  <strong>MSuite-HoneyPot</strong>
+                  <span class="text-secondary text-xs">Threat sensor + event telemetry bus publisher</span>
+                </div>
+              </label>
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdMstream" checked>
+                <div class="fleet-item-info">
+                  <strong>MStream</strong>
+                  <span class="text-secondary text-xs">Media streaming core + raw code access</span>
+                </div>
+              </label>
+              <label class="fleet-select-item">
+                <input type="checkbox" id="wizProdNexus" checked>
+                <div class="fleet-item-info">
+                  <strong>MSuite-Nexus Core</strong>
+                  <span class="text-secondary text-xs">Nexus self-update &amp; exchange maintenance</span>
+                </div>
+              </label>
+            </div>
+          </div>
+
+          <!-- STEP 4: SERVICE GATEWAY -->
+          <div class="wizard-pane" id="wizardPane4">
+            <h4>Step 4: Microservices Proxying (Optional)</h4>
+            <p class="text-secondary text-sm">
+              Configure initial internal backend microservices to forward traffic through Nexus with secure token injection.
+            </p>
+            <div class="form-group mt-3">
+              <label class="checkbox-pill">
+                <input type="checkbox" id="wizEnableTelemetryService" checked>
+                <span>Register default <strong>Telemetry &amp; Ingestion</strong> microservice</span>
+              </label>
+            </div>
+            <div class="service-config-box mt-2" id="wizTelemetryConfigBox">
+              <div class="form-group">
+                <label class="form-label">Service ID</label>
+                <input type="text" id="wizServiceId" class="form-input" value="telemetry" readonly>
+              </div>
+              <div class="form-group">
+                <label class="form-label">Upstream Backend Target URL</label>
+                <input type="text" id="wizServiceTarget" class="form-input" value="http://127.0.0.1:8001" placeholder="http://10.0.1.15:8000">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Injected Upstream Auth Token</label>
+                <input type="text" id="wizServiceAuth" class="form-input" placeholder="Bearer backend_internal_secret">
+              </div>
+            </div>
+          </div>
+
+          <!-- STEP 5: COMPLETION & OUTPUT -->
+          <div class="wizard-pane" id="wizardPane5">
+            <div class="alert-box alert-success mb-3">
+              🎉 <strong>Setup Complete!</strong> MSuite Nexus is configured and ready for production.
+            </div>
+            <h4>Generated Fleet Credentials</h4>
+            <p class="text-secondary text-sm">
+              All keys have been securely activated. Save this configuration now or download <code>.env.msuite</code>.
+            </p>
+            <div class="table-responsive mt-3">
+              <table class="data-table">
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th>Permissions</th>
+                    <th>API Key</th>
+                    <th>Action</th>
+                  </tr>
+                </thead>
+                <tbody id="wizardResultsTableBody"></tbody>
+              </table>
+            </div>
+
+            <div class="mt-4">
+              <div class="card-header" style="padding:0 0 8px 0;">
+                <label class="form-label" style="font-weight:600;">Unified Fleet .env Configuration</label>
+                <div style="display:flex; gap:8px;">
+                  <button class="btn-sm btn-outline" id="btnWizardCopyEnv">📋 Copy All Keys</button>
+                  <button class="btn-sm btn-primary" id="btnWizardDownloadEnv">💾 Download .env.msuite</button>
+                </div>
+              </div>
+              <pre class="snippet-pre"><code id="wizardEnvCode"></code></pre>
+            </div>
+          </div>
+        </div>
+
+        <div class="modal-footer wizard-footer">
+          <button class="btn btn-ghost" id="btnWizardPrev" style="visibility:hidden;">← Back</button>
+          <div style="display:flex; gap:8px;">
+            <button class="btn btn-ghost" id="btnWizardSkip">Cancel</button>
+            <button class="btn btn-primary" id="btnWizardNext">Next: GitHub Token →</button>
+            <button class="btn btn-primary hidden" id="btnWizardFinish">Go to Dashboard 🚀</button>
+          </div>
         </div>
       </div>
     </div>

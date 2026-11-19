@@ -74,6 +74,7 @@ Open **`http://localhost:8080/`** in your browser.
 
 **Nothing in MSuite Nexus requires CLI configuration.** All operations, fleet management, and governance are built directly into the Web Portal:
 
+- 🧙‍♂️ **Interactive Setup Wizard**: Walks administrators step-by-step through server identity, upstream GitHub connection verification, selective MSuite fleet provisioning, and backend microservice routing in 5 guided steps.
 - 🚀 **1-Click Fleet Auto-Provisioning**: Click the **1-Click Provision Fleet** button in the Portal to generate scoped API keys for the entire MSuite ecosystem (`Universal Master`, `MSuite-SIP`, `MSuite-Sentinel`, `MSuite-HoneyPot`, `MStream`, and `MSuite-Nexus`). Copy all keys or download `.env.msuite` with one click.
 - 🔑 **Client Key Governance**: Create, rotate, enable/disable, and delete client keys. Restrict keys to specific IPv4 CIDR ranges and configure expiration deadlines.
 - 🌐 **Service Gateway Registry**: Dynamically add, edit, test ping, and remove upstream backend microservices with automatic credential injection.

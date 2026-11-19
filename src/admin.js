@@ -622,5 +622,208 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
     });
   });
 
+  // --- MSuite Nexus Interactive Setup Wizard ---
+  router.post('/wizard/test-github', async (req, res) => {
+    const customToken = req.body?.token?.trim();
+    if (!customToken) {
+      const diag = await github.diagnose();
+      return res.json(diag);
+    }
+
+    const start = Date.now();
+    const apiUrl = (github?.apiUrl || config.githubApiUrl || 'https://api.github.com').replace(/\/+$/, '');
+    try {
+      const resp = await fetch(`${apiUrl}/user`, {
+        headers: {
+          'Authorization': `Bearer ${customToken}`,
+          'User-Agent': 'MSuite-Nexus-SetupWizard/2.0',
+          'Accept': 'application/vnd.github+json',
+        },
+      });
+      const latencyMs = Date.now() - start;
+      const rateRemaining = resp.headers.get('x-ratelimit-remaining');
+      const scopes = resp.headers.get('x-oauth-scopes') || 'fine-grained-or-none';
+
+      if (!resp.ok) {
+        return res.json({
+          ok: false,
+          status: resp.status,
+          latencyMs,
+          error: `GitHub rejected token with HTTP ${resp.status}`,
+        });
+      }
+
+      const userData = await resp.json();
+      res.json({
+        ok: true,
+        status: 200,
+        latencyMs,
+        scopes,
+        rateLimit: { remaining: rateRemaining },
+        user: { login: userData.login, name: userData.name, type: userData.type },
+      });
+    } catch (e) {
+      res.json({
+        ok: false,
+        latencyMs: Date.now() - start,
+        error: e.message,
+      });
+    }
+  });
+
+  router.post('/wizard/complete', async (req, res) => {
+    try {
+      const {
+        publicBaseUrl,
+        adminToken,
+        rateLimitPerMinute,
+        org = 'merlinthedev848',
+        githubToken,
+        products = {},
+        service,
+      } = req.body || {};
+
+      // 1. Update server settings
+      if (publicBaseUrl) {
+        config.publicBaseUrl = String(publicBaseUrl).trim().replace(/\/+$/, '');
+      }
+      if (adminToken && typeof adminToken === 'string' && adminToken.trim().length >= 8) {
+        config.adminToken = adminToken.trim();
+        config.adminTokenGenerated = false;
+      }
+      if (rateLimitPerMinute && Number.isFinite(Number(rateLimitPerMinute)) && Number(rateLimitPerMinute) > 0) {
+        config.rateLimitPerMinute = Number(rateLimitPerMinute);
+      }
+
+      // 2. Add or update GitHub token if provided
+      if (githubToken && typeof githubToken === 'string' && githubToken.trim()) {
+        const cleanPat = githubToken.trim();
+        if (config.githubTokens && !config.githubTokens.includes(cleanPat)) {
+          config.githubTokens.unshift(cleanPat);
+          config.githubToken = cleanPat;
+          github.tokens.unshift(cleanPat);
+          github.activeTokenIndex = 0;
+        }
+      }
+
+      // 3. Register service if requested
+      let registeredService = null;
+      if (service && service.enabled && gateway) {
+        try {
+          registeredService = gateway.registerService({
+            id: service.id || 'telemetry',
+            name: service.name || 'Sentinel Ingestion Daemon',
+            target: service.target || 'http://127.0.0.1:8001',
+            authHeader: service.authHeader || '',
+            allowedClients: ['*'],
+          });
+        } catch {}
+      }
+
+      // 4. Provision Fleet Products
+      const ALL_DEFS = [
+        {
+          key: 'universal',
+          name: 'msuite-fleet-universal',
+          description: 'Universal Master Key for all MSuite Products',
+          repos: [`${org}/*`],
+          permissions: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+        {
+          key: 'sip',
+          name: 'msuite-sip',
+          description: 'MSuite SIP Desktop & VoIP Client',
+          repos: [`${org}/MSuite-SIP`],
+          permissions: ['releases', 'raw', 'services'],
+        },
+        {
+          key: 'sentinel',
+          name: 'msuite-sentinel',
+          description: 'MSuite Sentinel Security Agent',
+          repos: [`${org}/MSuite-Sentinel`],
+          permissions: ['releases', 'raw', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+        {
+          key: 'honeypot',
+          name: 'msuite-honeypot',
+          description: 'MSuite HoneyPot Threat Sensor',
+          repos: [`${org}/MSuite-HoneyPot`],
+          permissions: ['releases', 'raw', 'services', 'bus:publish'],
+        },
+        {
+          key: 'mstream',
+          name: 'msuite-mstream',
+          description: 'MSuite Media & Streaming Core',
+          repos: [`${org}/MStream`],
+          permissions: ['releases', 'raw', 'archive', 'services'],
+        },
+        {
+          key: 'nexus',
+          name: 'msuite-nexus',
+          description: 'MSuite Nexus Central Gateway & Exchange',
+          repos: [`${org}/MSuite-Nexus`],
+          permissions: ['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe'],
+        },
+      ];
+
+      const provisioned = [];
+      const publicUrl = config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+      let envText = `# MSuite Products Fleet Configuration\n# Generated via Nexus Setup Wizard: ${new Date().toISOString()}\nMSUITE_NEXUS_URL=${publicUrl}\n\n`;
+
+      for (const def of ALL_DEFS) {
+        if (products[def.key] === false) continue;
+
+        let key;
+        const existing = clients.getClient(def.name);
+        if (existing) {
+          const rot = clients.rotateKey(def.name);
+          key = rot.key;
+          clients.updateClient(def.name, {
+            repos: def.repos,
+            permissions: def.permissions,
+            description: def.description,
+            disabled: false,
+          });
+        } else {
+          const added = clients.addClient({
+            name: def.name,
+            description: def.description,
+            repos: def.repos,
+            permissions: def.permissions,
+            allowedIps: ['*'],
+          });
+          key = added.key;
+        }
+
+        const envVar = def.name.toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY';
+        envText += `# ${def.description}\n${envVar}=${key}\n`;
+
+        provisioned.push({
+          name: def.name,
+          description: def.description,
+          repos: def.repos,
+          permissions: def.permissions,
+          key,
+        });
+      }
+
+      audit?.record({ actor: 'admin', ip: req.ip, action: 'WIZARD_COMPLETED', details: { org, clientCount: provisioned.length } });
+      events?.broadcast('client_change', { action: 'wizard_complete' });
+      events?.broadcast('settings_change', { time: new Date().toISOString() });
+
+      res.json({
+        ok: true,
+        message: 'MSuite Nexus setup completed successfully!',
+        adminToken: config.adminToken,
+        publicBaseUrl: config.publicBaseUrl,
+        provisioned,
+        envText,
+        registeredService,
+      });
+    } catch (e) {
+      res.status(500).json({ error: 'server_error', message: e.message });
+    }
+  });
+
   return router;
 }
