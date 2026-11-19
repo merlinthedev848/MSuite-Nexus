@@ -1,6 +1,31 @@
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
+import fs from 'node:fs';
+import path from 'node:path';
+
+function persistEnvUpdates(updates) {
+  try {
+    const envPath = path.resolve(process.cwd(), '.env');
+    let content = '';
+    if (fs.existsSync(envPath)) {
+      content = fs.readFileSync(envPath, 'utf8');
+    }
+    for (const [key, val] of Object.entries(updates)) {
+      if (val === undefined || val === null) continue;
+      const regex = new RegExp(`^${key}=.*$`, 'm');
+      const line = `${key}=${val}`;
+      if (regex.test(content)) {
+        content = content.replace(regex, line);
+      } else {
+        content += (content && !content.endsWith('\n') ? '\n' : '') + line + '\n';
+      }
+    }
+    fs.writeFileSync(envPath, content, 'utf8');
+  } catch {
+    // Non-fatal if environment is read-only
+  }
+}
 
 export function createAdminRouter({ config, clients, github, metrics, events, assetCache = null, audit = null, gateway = null, bus = null, log = console.log }) {
   const router = express.Router();
@@ -698,13 +723,24 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
       // 2. Add or update GitHub token if provided
       if (githubToken && typeof githubToken === 'string' && githubToken.trim()) {
         const cleanPat = githubToken.trim();
-        if (config.githubTokens && !config.githubTokens.includes(cleanPat)) {
+        if (!config.githubTokens) config.githubTokens = [];
+        if (!config.githubTokens.includes(cleanPat)) {
           config.githubTokens.unshift(cleanPat);
           config.githubToken = cleanPat;
+          if (!github.tokens) github.tokens = [];
           github.tokens.unshift(cleanPat);
-          github.activeTokenIndex = 0;
+          github.tokenIndex = 0;
         }
+        config.setupRequired = false;
       }
+
+      // Persist to .env file
+      const envUpdates = {};
+      if (publicBaseUrl) envUpdates.PUBLIC_BASE_URL = config.publicBaseUrl;
+      if (adminToken) envUpdates.ADMIN_TOKEN = config.adminToken;
+      if (rateLimitPerMinute) envUpdates.RATE_LIMIT_PER_MINUTE = config.rateLimitPerMinute;
+      if (githubToken && githubToken.trim()) envUpdates.GITHUB_TOKEN = githubToken.trim();
+      persistEnvUpdates(envUpdates);
 
       // 3. Register service if requested
       let registeredService = null;

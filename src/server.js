@@ -74,8 +74,13 @@ const server = app.listen(config.port, config.host, () => {
   log(`====================================================`);
   log(`  MSuite Nexus 2.0 (GitHub Private Proxy & Hub)     `);
   log(`====================================================`);
+  if (config.setupRequired) {
+    log(`  [!] SETUP MODE: No GitHub token configured yet.`);
+    log(`      Open http://${config.host}:${config.port}/setup in your browser to complete onboarding.`);
+  }
   log(`  Proxy API:    http://${config.host}:${config.port}/v1`);
   log(`  Web UI:       http://${config.host}:${config.port}/`);
+  log(`  Setup Wizard: http://${config.host}:${config.port}/setup`);
   log(`  Prometheus:   http://${config.host}:${config.port}/metrics`);
   log(`  Asset Cache:  ${config.assetCacheEnabled ? 'Enabled (' + Math.round(config.assetCacheMaxBytes / (1024 * 1024 * 1024)) + 'GB)' : 'Disabled'}`);
   log(`  Admin Token:  ${config.adminToken}`);

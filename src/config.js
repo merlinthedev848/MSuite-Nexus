@@ -41,9 +41,7 @@ export function loadConfig(env = process.env) {
     auditLogFile: env.AUDIT_LOG_FILE || path.join(process.cwd(), '.cache', 'audit.jsonl'),
   };
 
-  if (!cfg.githubTokens.length) {
-    throw new Error('GITHUB_TOKEN (or GITHUB_TOKENS) is required');
-  }
+  cfg.setupRequired = !cfg.githubTokens.length;
 
   if (!cfg.adminToken) {
     cfg.adminToken = 'msuite_adm_' + randomBytes(24).toString('base64url');

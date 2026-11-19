@@ -21,24 +21,28 @@ YELLOW='\033[1;33m'
 RED='\033[0;31m'
 NC='\033[0m' # No Color
 
-echo -e "${CYAN}${BOLD}"
-echo "================================================================================"
-echo "          __  __ ____        _ _        _   _                     "
-echo "         |  \/  / ___| _   _(_) |_ ___ | \ | | _____  ___   _ ___ "
-echo "         | |\/| \___ \| | | | | __/ _ \|  \| |/ _ \ \/ / | | / __|"
-echo "         | |  | |___) | |_| | | ||  __/| |\  |  __/>  <| |_| \__ \\"
-echo "         |_|  |_|____/ \__,_|_|\__\___||_| \_|\___/_/\_\\\__,_|___/"
-echo "                                                                                "
-echo "               Enterprise Binary Hub, Gateway & Portal Installer                "
-echo "================================================================================${NC}"
+print_msg() {
+  printf "%b\n" "$*"
+}
+
+print_msg "${CYAN}${BOLD}"
+print_msg "================================================================================"
+print_msg "          __  __ ____        _ _        _   _                     "
+print_msg "         |  \/  / ___| _   _(_) |_ ___ | \ | | _____  ___   _ ___ "
+print_msg "         | |\/| \___ \| | | | | __/ _ \|  \| |/ _ \ \/ / | | / __|"
+print_msg "         | |  | |___) | |_| | | ||  __/| |\  |  __/>  <| |_| \__ \\"
+print_msg "         |_|  |_|____/ \__,_|_|\__\___||_| \_|\___/_/\_\\\__,_|___/"
+print_msg "                                                                                "
+print_msg "               Enterprise Binary Hub, Gateway & Portal Installer                "
+print_msg "================================================================================${NC}"
 
 # Check for root privileges
 if [ "$(id -u)" -ne 0 ]; then
   if command -v sudo >/dev/null 2>&1; then
-    echo -e "${YELLOW}[!] Root privileges required. Escalating with sudo...${NC}"
+    print_msg "${YELLOW}[!] Root privileges required. Escalating with sudo...${NC}"
     exec sudo bash "$0" "$@"
   else
-    echo -e "${RED}[✗] Error: This installer must be run as root or with sudo.${NC}"
+    print_msg "${RED}[✗] Error: This installer must be run as root or with sudo.${NC}"
     exit 1
   fi
 fi
@@ -48,17 +52,17 @@ REPO_URL="https://github.com/merlinthedev848/MSuite-Nexus.git"
 
 if [ -f "package.json" ] && grep -q '"name": "msuite-nexus"' package.json 2>/dev/null; then
   INSTALL_DIR="$(pwd)"
-  echo -e "${GREEN}[+] Running inside existing MSuite-Nexus directory: ${INSTALL_DIR}${NC}"
+  print_msg "${GREEN}[+] Running inside existing MSuite-Nexus directory: ${INSTALL_DIR}${NC}"
 elif [ -d "/opt/msuite-nexus" ]; then
   INSTALL_DIR="/opt/msuite-nexus"
-  echo -e "${GREEN}[+] Existing installation detected at: ${INSTALL_DIR}${NC}"
+  print_msg "${GREEN}[+] Existing installation detected at: ${INSTALL_DIR}${NC}"
 else
   INSTALL_DIR="/opt/msuite-nexus"
-  echo -e "${GREEN}[+] Setting installation directory to: ${INSTALL_DIR}${NC}"
+  print_msg "${GREEN}[+] Setting installation directory to: ${INSTALL_DIR}${NC}"
 fi
 
 # Step 1: Package Manager & Environment Preparation
-echo -e "${CYAN}[1/6] Preparing system dependencies...${NC}"
+print_msg "${CYAN}[1/6] Preparing system dependencies...${NC}"
 
 if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
   export DEBIAN_FRONTEND=noninteractive
@@ -73,12 +77,12 @@ if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
   apt-get install -y curl ca-certificates gnupg git openssl
 
   # Purge old conflicting Ubuntu/Debian nodejs & dev packages (resolves common.gypi conflict)
-  echo -e "${CYAN}[+] Cleaning up legacy/conflicting Node packages...${NC}"
+  print_msg "${CYAN}[+] Cleaning up legacy/conflicting Node packages...${NC}"
   apt-get remove --purge -y libnode-dev libnode72 nodejs npm 2>/dev/null || true
   apt-get autoremove -y 2>/dev/null || true
 
   # Add official NodeSource Node.js 22 LTS repository
-  echo -e "${CYAN}[+] Adding NodeSource Node.js 22 LTS repository...${NC}"
+  print_msg "${CYAN}[+] Adding NodeSource Node.js 22 LTS repository...${NC}"
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs
 
@@ -89,7 +93,7 @@ elif [ -f /etc/redhat-release ]; then
 else
   # Generic Linux fallback
   if ! command -v node >/dev/null 2>&1 || [ "$(node -v | tr -d 'v' | cut -d. -f1)" -lt 20 ]; then
-    echo -e "${YELLOW}[!] Installing Node 22 via NVM fallback...${NC}"
+    print_msg "${YELLOW}[!] Installing Node 22 via NVM fallback...${NC}"
     curl -o- https://raw.githubusercontent.com/nvm-sh/nvm/v0.39.7/install.sh | bash
     export NVM_DIR="$HOME/.nvm"
     [ -s "$NVM_DIR/nvm.sh" ] && \. "$NVM_DIR/nvm.sh"
@@ -101,18 +105,18 @@ fi
 
 # Step 2: Validate Node.js version
 NODE_VERSION=$(node -v 2>/dev/null || echo "none")
-echo -e "${GREEN}[✓] Node.js installed: ${NODE_VERSION}${NC}"
+print_msg "${GREEN}[✓] Node.js installed: ${NODE_VERSION}${NC}"
 
 NODE_MAJOR=$(node -v 2>/dev/null | tr -d 'v' | cut -d. -f1 || echo "0")
 if [ "$NODE_MAJOR" -lt 20 ]; then
-  echo -e "${RED}[✗] Error: Node.js 20 or higher is required. Found: ${NODE_VERSION}${NC}"
+  print_msg "${RED}[✗] Error: Node.js 20 or higher is required. Found: ${NODE_VERSION}${NC}"
   exit 1
 fi
 
 # Step 3: Fetch / Update Repository
-echo -e "${CYAN}[2/6] Setting up MSuite-Nexus source code...${NC}"
+print_msg "${CYAN}[2/6] Setting up MSuite-Nexus source code...${NC}"
 if [ -d "$INSTALL_DIR/.git" ]; then
-  echo -e "${GREEN}[+] Updating existing repository at ${INSTALL_DIR}...${NC}"
+  print_msg "${GREEN}[+] Updating existing repository at ${INSTALL_DIR}...${NC}"
   cd "$INSTALL_DIR"
   git fetch --all --prune
   git checkout main 2>/dev/null || true
@@ -120,19 +124,19 @@ if [ -d "$INSTALL_DIR/.git" ]; then
 else
   mkdir -p "$INSTALL_DIR"
   if [ "$INSTALL_DIR" != "$(pwd)" ]; then
-    echo -e "${GREEN}[+] Cloning MSuite-Nexus into ${INSTALL_DIR}...${NC}"
+    print_msg "${GREEN}[+] Cloning MSuite-Nexus into ${INSTALL_DIR}...${NC}"
     git clone "$REPO_URL" "$INSTALL_DIR"
     cd "$INSTALL_DIR"
   fi
 fi
 
 # Step 4: Install Dependencies
-echo -e "${CYAN}[3/6] Installing npm packages...${NC}"
+print_msg "${CYAN}[3/6] Installing npm packages...${NC}"
 cd "$INSTALL_DIR"
 npm ci 2>/dev/null || npm install
 
 # Step 5: Configure Environment & Tokens
-echo -e "${CYAN}[4/6] Initializing production configuration...${NC}"
+print_msg "${CYAN}[4/6] Initializing production configuration...${NC}"
 mkdir -p "$INSTALL_DIR/.cache" "$INSTALL_DIR/data"
 
 if [ ! -f "$INSTALL_DIR/.env" ]; then
@@ -148,9 +152,9 @@ if [ ! -f "$INSTALL_DIR/.env" ]; then
   else
     echo "ADMIN_TOKEN=${RANDOM_ADMIN_TOKEN}" >> "$INSTALL_DIR/.env"
   fi
-  echo -e "${GREEN}[✓] Created .env with generated ADMIN_TOKEN${NC}"
+  print_msg "${GREEN}[✓] Created .env with generated ADMIN_TOKEN${NC}"
 else
-  echo -e "${GREEN}[✓] Preserved existing .env configuration${NC}"
+  print_msg "${GREEN}[✓] Preserved existing .env configuration${NC}"
 fi
 
 # Read configured ADMIN_TOKEN and PORT
@@ -159,7 +163,7 @@ PORT=$(grep -E "^PORT=" "$INSTALL_DIR/.env" 2>/dev/null | cut -d= -f2- | tr -d '
 [ -z "$PORT" ] && PORT=8080
 
 # Step 6: Setup Systemd Service
-echo -e "${CYAN}[5/6] Configuring systemd background service...${NC}"
+print_msg "${CYAN}[5/6] Configuring systemd background service...${NC}"
 NODE_PATH=$(command -v node)
 
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -186,10 +190,10 @@ EOF
   systemctl enable msuite-nexus.service >/dev/null 2>&1
   systemctl restart msuite-nexus.service
 
-  echo -e "${GREEN}[✓] Systemd service 'msuite-nexus' created and started!${NC}"
+  print_msg "${GREEN}[✓] Systemd service 'msuite-nexus' created and started!${NC}"
   SERVICE_STATUS="Running as systemd daemon (msuite-nexus.service)"
 else
-  echo -e "${YELLOW}[!] systemd not active (container or WSL environment).${NC}"
+  print_msg "${YELLOW}[!] systemd not active (container or WSL environment).${NC}"
   SERVICE_STATUS="Run manually via: cd ${INSTALL_DIR} && npm start"
 fi
 
@@ -199,19 +203,19 @@ IP_ADDR=$(hostname -I 2>/dev/null | awk '{print $1}' || curl -s https://api.ipif
 
 # Final Success Banner
 echo ""
-echo -e "${GREEN}${BOLD}================================================================================"
-echo -e "              🚀 MSuite Nexus Installed & Ready to Use!                         "
-echo -e "================================================================================${NC}"
-echo -e "  ${BOLD}Status:${NC}        ${SERVICE_STATUS}"
-echo -e "  ${BOLD}Install Dir:${NC}   ${INSTALL_DIR}"
-echo -e "  ${BOLD}Web Portal:${NC}    ${CYAN}http://${IP_ADDR}:${PORT}/${NC}"
-echo -e "  ${BOLD}Setup Wizard:${NC}  ${CYAN}http://${IP_ADDR}:${PORT}/setup${NC}"
-echo -e "  ${BOLD}Admin Token:${NC}   ${YELLOW}${ADMIN_TOKEN}${NC}"
+print_msg "${GREEN}${BOLD}================================================================================"
+print_msg "              🚀 MSuite Nexus Installed & Ready to Use!                         "
+print_msg "================================================================================${NC}"
+print_msg "  ${BOLD}Status:${NC}        ${SERVICE_STATUS}"
+print_msg "  ${BOLD}Install Dir:${NC}   ${INSTALL_DIR}"
+print_msg "  ${BOLD}Web Portal:${NC}    ${CYAN}http://${IP_ADDR}:${PORT}/${NC}"
+print_msg "  ${BOLD}Setup Wizard:${NC}  ${CYAN}http://${IP_ADDR}:${PORT}/setup${NC}"
+print_msg "  ${BOLD}Admin Token:${NC}   ${YELLOW}${ADMIN_TOKEN}${NC}"
 echo ""
-echo -e "  ${BOLD}Service Controls:${NC}"
-echo -e "    • Status:   ${CYAN}systemctl status msuite-nexus${NC}"
-echo -e "    • Logs:     ${CYAN}journalctl -u msuite-nexus -f${NC}"
-echo -e "    • Restart:  ${CYAN}systemctl restart msuite-nexus${NC}"
-echo -e "================================================================================"
-echo -e "${BOLD}Next Step:${NC} Open ${CYAN}http://${IP_ADDR}:${PORT}/setup${NC} in your browser to complete onboarding!"
+print_msg "  ${BOLD}Service Controls:${NC}"
+print_msg "    • Status:   ${CYAN}systemctl status msuite-nexus${NC}"
+print_msg "    • Logs:     ${CYAN}journalctl -u msuite-nexus -f${NC}"
+print_msg "    • Restart:  ${CYAN}systemctl restart msuite-nexus${NC}"
+print_msg "================================================================================"
+print_msg "${BOLD}Next Step:${NC} Open ${CYAN}http://${IP_ADDR}:${PORT}/setup${NC} in your browser to complete onboarding!"
 echo ""

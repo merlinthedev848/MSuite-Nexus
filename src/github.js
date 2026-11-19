@@ -28,12 +28,14 @@ export class GitHub {
     metrics = null,
   }) {
     const list = Array.isArray(tokens) && tokens.length ? tokens : token ? [token] : [];
-    if (!list.length) throw new Error('At least one GitHub token is required');
-
     this.tokens = list;
     this.tokenIndex = 0;
-    this.apiUrl = apiUrl.replace(/\/+$/, '');
-    this.apiOrigin = new URL(apiUrl).origin;
+    this.apiUrl = (apiUrl || 'https://api.github.com').replace(/\/+$/, '');
+    try {
+      this.apiOrigin = new URL(this.apiUrl).origin;
+    } catch {
+      this.apiOrigin = 'https://api.github.com';
+    }
     this.cacheTtlMs = cacheTtlMs;
     this.cacheMaxEntries = cacheMaxEntries;
     this.fetch = fetchImpl;
@@ -43,6 +45,7 @@ export class GitHub {
   }
 
   get activeToken() {
+    if (!this.tokens.length) return '';
     return this.tokens[this.tokenIndex % this.tokens.length];
   }
 
@@ -126,6 +129,9 @@ export class GitHub {
 
   /** GET a JSON API path with TTL + ETag caching & token failover */
   async json(path) {
+    if (!this.tokens.length) {
+      throw new UpstreamError(503, 'GitHub access token not configured. Visit /setup in your browser to configure.');
+    }
     const cleanPath = path.startsWith('/') ? path : '/' + path;
     const now = Date.now();
     const hit = this.cache.get(cleanPath);
@@ -175,6 +181,9 @@ export class GitHub {
 
   /** GET binary content with redirect sanitation and failover */
   async stream(path, { accept = 'application/octet-stream', range } = {}) {
+    if (!this.tokens.length) {
+      throw new UpstreamError(503, 'GitHub access token not configured. Visit /setup in your browser to configure.');
+    }
     const cleanPath = path.startsWith('/') ? path : '/' + path;
     let url = new URL(this.apiUrl + cleanPath);
     const extra = range ? { Range: range } : {};
@@ -214,6 +223,13 @@ export class GitHub {
 
   /** Run a diagnostic ping to test upstream GitHub connectivity and token privileges */
   async diagnose() {
+    if (!this.tokens.length) {
+      return {
+        ok: false,
+        status: 503,
+        error: 'No GitHub token configured. Please run Setup Wizard at /setup.',
+      };
+    }
     const start = Date.now();
     const token = this.activeToken;
     try {

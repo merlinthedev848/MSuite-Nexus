@@ -758,3 +758,18 @@ test('ServiceGateway handles unreachable upstream gracefully with 502', async ()
     (err) => err.status === 502 || /502|unreachable|Failed to reach/i.test(err.message)
   );
 });
+
+test('Setup Mode: Server boots without GITHUB_TOKEN and reports setupRequired', async () => {
+  const { loadConfig } = await import('../src/config.js');
+  const cfg = loadConfig({ PORT: '9999' });
+  assert.equal(cfg.setupRequired, true);
+  assert.equal(cfg.githubTokens.length, 0);
+
+  const gh = new GitHub({ tokens: [] });
+  assert.equal(gh.tokens.length, 0);
+  assert.equal(gh.activeToken, '');
+
+  const diag = await gh.diagnose();
+  assert.equal(diag.ok, false);
+  assert.equal(diag.status, 503);
+});
