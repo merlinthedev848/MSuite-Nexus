@@ -36,7 +36,19 @@ MSuite App ──(API Key)──▶ Nexus       ┼──▶ Local NVMe Asset Ca
 
 ## Quick Start
 
-### 1. Installation & Prerequisites
+### ⚡ One-Line Automated Installer (Recommended)
+
+Run this single command on your Linux server (Ubuntu, Debian, RHEL, CentOS, Rocky, Fedora) to automatically install Node 22 LTS, resolve package conflicts, configure systemd, and launch MSuite Nexus:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/merlinthedev848/MSuite-Nexus/main/install.sh | sudo bash
+```
+
+Once installed, open **`http://<your-server-ip>:8080/setup`** in your browser to complete onboarding with the Setup Wizard!
+
+---
+
+### Manual Installation & Prerequisites
 
 MSuite Nexus requires **Node.js >= 20** (for native `fetch`, crypto, and Express 5).
 
