@@ -62,6 +62,10 @@ echo -e "${CYAN}[1/6] Preparing system dependencies...${NC}"
 
 if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
   export DEBIAN_FRONTEND=noninteractive
+  # Remove conflicting or duplicate NodeSource apt sources and keyrings first
+  rm -f /etc/apt/sources.list.d/nodesource*.list /etc/apt/sources.list.d/nodesource*.sources 2>/dev/null || true
+  rm -f /etc/apt/keyrings/nodesource.gpg /usr/share/keyrings/nodesource.gpg 2>/dev/null || true
+
   # Fix any previously interrupted dpkg / apt transactions
   dpkg --configure -a 2>/dev/null || true
   apt-get -f install -y 2>/dev/null || true
@@ -75,10 +79,7 @@ if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
 
   # Add official NodeSource Node.js 22 LTS repository
   echo -e "${CYAN}[+] Adding NodeSource Node.js 22 LTS repository...${NC}"
-  mkdir -p /etc/apt/keyrings
-  curl -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key | gpg --dearmor -o /etc/apt/keyrings/nodesource.gpg --yes 2>/dev/null || true
-  echo "deb [signed-by=/etc/apt/keyrings/nodesource.gpg] https://deb.nodesource.com/node_22.x nodistro main" | tee /etc/apt/sources.list.d/nodesource.list >/dev/null
-  apt-get update -y
+  curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs
 
 elif [ -f /etc/redhat-release ]; then

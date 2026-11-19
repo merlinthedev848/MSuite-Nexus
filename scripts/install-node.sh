@@ -26,10 +26,17 @@ fi
 echo "[+] Installing Node.js 22 LTS via official NodeSource repository..."
 
 if [ -f /etc/debian_version ] || [ -f /etc/lsb-release ]; then
+  # Remove conflicting or duplicate NodeSource apt sources and keyrings first
+  rm -f /etc/apt/sources.list.d/nodesource*.list /etc/apt/sources.list.d/nodesource*.sources 2>/dev/null || true
+  rm -f /etc/apt/keyrings/nodesource.gpg /usr/share/keyrings/nodesource.gpg 2>/dev/null || true
+
+  # Fix any previously interrupted dpkg / apt transactions
+  dpkg --configure -a 2>/dev/null || true
+  apt-get -f install -y 2>/dev/null || true
   apt-get update -y
   apt-get install -y curl ca-certificates gnupg
   # Remove old conflicting Ubuntu packages if present (e.g. libnode-dev, libnode72)
-  apt-get remove -y libnode-dev libnode72 nodejs npm 2>/dev/null || true
+  apt-get remove --purge -y libnode-dev libnode72 nodejs npm 2>/dev/null || true
   apt-get autoremove -y 2>/dev/null || true
   curl -fsSL https://deb.nodesource.com/setup_22.x | bash -
   apt-get install -y -o Dpkg::Options::="--force-overwrite" nodejs
