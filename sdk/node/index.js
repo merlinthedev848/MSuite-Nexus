@@ -82,6 +82,16 @@ export class NexusClient {
   }
 
   /**
+   * List private & public repositories permitted for this client key
+   * @returns {Promise<Array<{full_name: string, name: string, private: boolean, description: string, releases_url: string, update_url: string}>>}
+   */
+  async listRepos() {
+    const res = await this._request('/v1/repos');
+    const data = await res.json();
+    return data.repos || [];
+  }
+
+  /**
    * Check if a newer version is available on a specific release channel
    * @param {string} repo - "owner/repo" (e.g. "merlinthedev848/MSuite-SIP")
    * @param {string} currentVersion - Current app version (e.g. "1.0.0")

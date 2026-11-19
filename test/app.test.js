@@ -773,3 +773,24 @@ test('Setup Mode: Server boots without GITHUB_TOKEN and reports setupRequired', 
   assert.equal(diag.ok, false);
   assert.equal(diag.status, 503);
 });
+
+test('Repository Discovery: /v1/repos lists private & public repos filtered by client key', async () => {
+  const client = new NexusClient({ baseUrl: base, apiKey: KEY_A });
+  const repos = await client.listRepos();
+  assert.ok(Array.isArray(repos));
+  assert.ok(repos.length > 0);
+
+  const appRepo = repos.find((r) => r.full_name === 'acme/app');
+  assert.ok(appRepo, 'Expected acme/app to be discovered');
+  assert.equal(appRepo.private, true);
+  assert.ok(appRepo.releases_url.includes('/v1/repos/acme/app/releases'));
+  assert.ok(appRepo.update_url.includes('/v1/repos/acme/app/update'));
+
+  // Direct fetch with client key
+  const res = await get('/v1/repos', KEY_A);
+  assert.equal(res.status, 200);
+  const body = await res.json();
+  assert.equal(body.ok, true);
+  assert.equal(body.client, 'a');
+  assert.ok(body.repos.length >= 1);
+});

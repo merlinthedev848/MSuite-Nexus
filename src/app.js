@@ -316,6 +316,42 @@ export function createApp({ config, clients, github, metrics, events, assetCache
 
   const wrap = (fn) => (req, res, next) => Promise.resolve(fn(req, res, next)).catch(next);
 
+  // Repositories discovery endpoint for authenticated clients (private & public)
+  v1.get('/repos', wrap(async (req, res) => {
+    const base = config.publicBaseUrl || `${req.protocol}://${req.get('host')}`;
+    const list = await github.json('/user/repos?per_page=100&sort=updated&visibility=all&affiliation=owner,collaborator,organization_member');
+    const filtered = (Array.isArray(list) ? list : [])
+      .filter((r) => {
+        const [owner, name] = (r.full_name || '').split('/');
+        if (!owner || !name) return false;
+        const o = owner.toLowerCase();
+        const full = `${o}/${name.toLowerCase()}`;
+        return req.client.repos.some((p) => p === '*' || p === full || p === `${o}/*`);
+      })
+      .map((r) => {
+        const [owner, name] = (r.full_name || '').split('/');
+        return {
+          full_name: r.full_name,
+          name: r.name,
+          owner: r.owner?.login || owner,
+          private: Boolean(r.private),
+          description: r.description,
+          default_branch: r.default_branch,
+          updated_at: r.updated_at,
+          releases_url: `${base}/v1/repos/${enc(owner)}/${enc(name)}/releases`,
+          latest_release_url: `${base}/v1/repos/${enc(owner)}/${enc(name)}/releases/latest`,
+          update_url: `${base}/v1/repos/${enc(owner)}/${enc(name)}/update`,
+        };
+      });
+
+    res.json({
+      ok: true,
+      client: req.client.name,
+      count: filtered.length,
+      repos: filtered,
+    });
+  }));
+
   // Releases listing
   v1.get('/repos/:owner/:repo/releases', repoGuard('releases'), wrap(async (req, res) => {
     const perPage = Math.min(Math.max(parseInt(req.query.per_page, 10) || 10, 1), 100);

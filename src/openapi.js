@@ -136,6 +136,48 @@ export function generateOpenApiSpec({ publicBaseUrl = '' } = {}) {
           },
         },
       },
+      '/v1/repos': {
+        get: {
+          summary: 'List Authorized Repositories (Private & Public)',
+          description: 'Discovers all private and public GitHub repositories authorized for this client key with direct release and update gateway URLs.',
+          security: [{ BearerAuth: [] }, { ApiKeyAuth: [] }],
+          responses: {
+            '200': {
+              description: 'List of authorized repositories',
+              content: {
+                'application/json': {
+                  schema: {
+                    type: 'object',
+                    properties: {
+                      ok: { type: 'boolean' },
+                      client: { type: 'string' },
+                      count: { type: 'integer' },
+                      repos: {
+                        type: 'array',
+                        items: {
+                          type: 'object',
+                          properties: {
+                            full_name: { type: 'string' },
+                            name: { type: 'string' },
+                            owner: { type: 'string' },
+                            private: { type: 'boolean' },
+                            description: { type: 'string' },
+                            default_branch: { type: 'string' },
+                            releases_url: { type: 'string' },
+                            latest_release_url: { type: 'string' },
+                            update_url: { type: 'string' },
+                          },
+                        },
+                      },
+                    },
+                  },
+                },
+              },
+            },
+            '401': { description: 'Missing or expired key' },
+          },
+        },
+      },
       '/v1/repos/{owner}/{repo}/update': {
         get: {
           summary: 'Check for Software Updates',

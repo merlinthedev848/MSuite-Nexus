@@ -367,15 +367,22 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
   // Repos & Releases Explorer
   router.get('/repos', async (req, res) => {
     try {
-      const list = await github.json('/user/repos?per_page=100&sort=updated');
-      const repos = list.map((r) => ({
+      const { visibility = 'all', affiliation = 'owner,collaborator,organization_member', org } = req.query;
+      let path = `/user/repos?per_page=100&sort=updated&visibility=${encodeURIComponent(visibility)}&affiliation=${encodeURIComponent(affiliation)}`;
+      if (org) {
+        path = `/orgs/${encodeURIComponent(org)}/repos?per_page=100&sort=updated&type=all`;
+      }
+      const list = await github.json(path);
+      const repos = (Array.isArray(list) ? list : []).map((r) => ({
         full_name: r.full_name,
         name: r.name,
-        owner: r.owner.login,
-        private: r.private,
+        owner: r.owner?.login || '',
+        private: Boolean(r.private),
+        visibility: r.visibility || (r.private ? 'private' : 'public'),
         description: r.description,
         default_branch: r.default_branch,
         updated_at: r.updated_at,
+        html_url: r.html_url,
       }));
       res.json(repos);
     } catch (e) {
@@ -679,6 +686,29 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
       }
 
       const userData = await resp.json();
+
+      let repoStats = null;
+      try {
+        const repoResp = await fetch(`${apiUrl}/user/repos?per_page=100&visibility=all&affiliation=owner,collaborator,organization_member`, {
+          headers: {
+            'Authorization': `Bearer ${customToken}`,
+            'User-Agent': 'MSuite-Nexus-SetupWizard/2.0',
+            'Accept': 'application/vnd.github+json',
+          },
+        });
+        if (repoResp.ok) {
+          const repoList = await repoResp.json();
+          if (Array.isArray(repoList)) {
+            const privateCount = repoList.filter((r) => r.private).length;
+            repoStats = {
+              total: repoList.length,
+              private: privateCount,
+              public: repoList.length - privateCount,
+            };
+          }
+        }
+      } catch {}
+
       res.json({
         ok: true,
         status: 200,
@@ -686,6 +716,7 @@ export function createAdminRouter({ config, clients, github, metrics, events, as
         scopes,
         rateLimit: { remaining: rateRemaining },
         user: { login: userData.login, name: userData.name, type: userData.type },
+        repos: repoStats,
       });
     } catch (e) {
       res.json({

@@ -430,6 +430,8 @@ function showKeyModal(clientName, key) {
 }
 
 // 3. REPOSITORY EXPLORER
+let repoVisibilityFilter = 'all';
+
 async function loadRepos() {
   const container = el('repoList');
   container.innerHTML = '<div class="text-center text-muted p-4">Loading repositories...</div>';
@@ -444,8 +446,14 @@ async function loadRepos() {
 
 function renderRepoList(list) {
   const container = el('repoList');
-  const filter = (el('repoSearchInput').value || '').toLowerCase();
-  const filtered = list.filter((r) => r.full_name.toLowerCase().includes(filter));
+  const search = (el('repoSearchInput').value || '').toLowerCase();
+  const filtered = list.filter((r) => {
+    const matchesSearch = r.full_name.toLowerCase().includes(search) || (r.description || '').toLowerCase().includes(search);
+    if (!matchesSearch) return false;
+    if (repoVisibilityFilter === 'private') return r.private;
+    if (repoVisibilityFilter === 'public') return !r.private;
+    return true;
+  });
 
   if (!filtered.length) {
     container.innerHTML = '<div class="text-center text-muted p-4">No matching repositories</div>';
@@ -454,7 +462,12 @@ function renderRepoList(list) {
 
   container.innerHTML = filtered.map((r) => `
     <div class="repo-item ${state.selectedRepo?.full_name === r.full_name ? 'selected' : ''}" data-repo="${escapeHtml(r.full_name)}">
-      <div class="repo-name">${escapeHtml(r.full_name)}</div>
+      <div style="display:flex; justify-content:space-between; align-items:center; gap:0.5rem;">
+        <span class="repo-name" style="word-break:break-all;">${escapeHtml(r.full_name)}</span>
+        <span class="badge ${r.private ? 'badge-warning' : 'badge-outline'}" style="font-size:0.65rem; padding:0.15rem 0.4rem; white-space:nowrap;">
+          ${r.private ? '🔒 Private' : '🌐 Public'}
+        </span>
+      </div>
       <div class="repo-desc">${escapeHtml(r.description || 'No description')}</div>
     </div>
   `).join('');
@@ -476,7 +489,8 @@ async function selectRepo(fullName) {
 
   el('repoTitle').textContent = repo.full_name;
   el('repoDescription').textContent = repo.description || 'No repository description';
-  el('repoVisibilityBadge').textContent = repo.private ? 'Private' : 'Public';
+  el('repoVisibilityBadge').textContent = repo.private ? '🔒 Private' : '🌐 Public';
+  el('repoVisibilityBadge').className = repo.private ? 'badge badge-warning' : 'badge';
   el('repoBranchBadge').textContent = repo.default_branch || 'main';
 
   updateSnippet();
@@ -1207,7 +1221,10 @@ async function testWizardGithub() {
     });
 
     if (data.ok) {
-      resEl.innerHTML = `<span class="text-emerald">✓ Connected successfully to GitHub! Authenticated as <strong>${escapeHtml(data.user?.login || 'PAT User')}</strong> (Quota remaining: ${data.rateLimit?.remaining ?? '5000'})</span>`;
+      const repoInfo = data.repos
+        ? ` • Found ${data.repos.total} repositories (${data.repos.private} private)`
+        : '';
+      resEl.innerHTML = `<span class="text-emerald">✓ Connected successfully to GitHub! Authenticated as <strong>${escapeHtml(data.user?.login || 'PAT User')}</strong> (Quota: ${data.rateLimit?.remaining ?? '5000'}${repoInfo})</span>`;
     } else {
       resEl.innerHTML = `<span class="text-danger">⚠️ ${escapeHtml(data.error || 'Connection failed')}</span>`;
     }
@@ -1416,6 +1433,34 @@ function setupEventListeners() {
   // Explorer
   el('btnRefreshRepos').onclick = loadRepos;
   el('repoSearchInput').oninput = () => renderRepoList(state.repos);
+
+  if (el('btnFilterAllRepos')) {
+    el('btnFilterAllRepos').onclick = () => {
+      repoVisibilityFilter = 'all';
+      el('btnFilterAllRepos').classList.add('active');
+      el('btnFilterPrivateRepos').classList.remove('active');
+      el('btnFilterPublicRepos').classList.remove('active');
+      renderRepoList(state.repos || []);
+    };
+  }
+  if (el('btnFilterPrivateRepos')) {
+    el('btnFilterPrivateRepos').onclick = () => {
+      repoVisibilityFilter = 'private';
+      el('btnFilterAllRepos').classList.remove('active');
+      el('btnFilterPrivateRepos').classList.add('active');
+      el('btnFilterPublicRepos').classList.remove('active');
+      renderRepoList(state.repos || []);
+    };
+  }
+  if (el('btnFilterPublicRepos')) {
+    el('btnFilterPublicRepos').onclick = () => {
+      repoVisibilityFilter = 'public';
+      el('btnFilterAllRepos').classList.remove('active');
+      el('btnFilterPrivateRepos').classList.remove('active');
+      el('btnFilterPublicRepos').classList.add('active');
+      renderRepoList(state.repos || []);
+    };
+  }
   el('btnRefreshReleases').onclick = () => {
     if (state.selectedRepo) loadReleases(state.selectedRepo.full_name);
   };
