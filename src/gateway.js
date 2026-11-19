@@ -192,7 +192,16 @@ export class ServiceGateway {
       }
     }
 
-    const upstreamRes = await this.fetch(targetUrl, fetchOptions);
+    let upstreamRes;
+    try {
+      upstreamRes = await this.fetch(targetUrl, fetchOptions);
+    } catch (e) {
+      this.log(`Gateway forward failed for service "${service.id}" (${targetUrl}): ${e.message}`);
+      return res.status(502).json({
+        error: 'gateway_upstream_error',
+        message: `Failed to reach upstream service "${service.id}": ${e.message}`,
+      });
+    }
 
     res.status(upstreamRes.status);
     upstreamRes.headers.forEach((v, k) => {

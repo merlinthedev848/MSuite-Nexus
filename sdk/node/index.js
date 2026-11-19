@@ -172,7 +172,15 @@ export class NexusClient {
       throw new Error(`SHA-256 Checksum Mismatch! Expected ${expectedSha256}, calculated ${actualSha256}`);
     }
 
-    fs.renameSync(tempPath, destPath);
+    try {
+      if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch {}
+      }
+      fs.renameSync(tempPath, destPath);
+    } catch {
+      fs.copyFileSync(tempPath, destPath);
+      try { fs.unlinkSync(tempPath); } catch {}
+    }
 
     return {
       path: destPath,

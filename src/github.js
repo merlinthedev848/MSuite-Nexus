@@ -126,8 +126,9 @@ export class GitHub {
 
   /** GET a JSON API path with TTL + ETag caching & token failover */
   async json(path) {
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
     const now = Date.now();
-    const hit = this.cache.get(path);
+    const hit = this.cache.get(cleanPath);
     if (hit && hit.expires > now) {
       this.metrics?.recordCacheHit();
       return hit.value;
@@ -137,7 +138,7 @@ export class GitHub {
     const headers = this.authHeaders(token, { Accept: 'application/vnd.github+json' });
     if (hit?.etag) headers['If-None-Match'] = hit.etag;
 
-    let res = await this.fetch(this.apiUrl + path, { headers });
+    let res = await this.fetch(this.apiUrl + cleanPath, { headers });
     this.updateRateLimits(token, res.headers);
 
     // If rate-limited or forbidden and we have alternative tokens in the pool, try next token
@@ -174,7 +175,8 @@ export class GitHub {
 
   /** GET binary content with redirect sanitation and failover */
   async stream(path, { accept = 'application/octet-stream', range } = {}) {
-    let url = new URL(this.apiUrl + path);
+    const cleanPath = path.startsWith('/') ? path : '/' + path;
+    let url = new URL(this.apiUrl + cleanPath);
     const extra = range ? { Range: range } : {};
     let token = this.activeToken;
 

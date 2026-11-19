@@ -96,6 +96,18 @@ export function createApp({ config, clients, github, metrics, events, assetCache
   app.get('/openapi.json', openApiHandler);
   app.get('/api/openapi.json', openApiHandler);
 
+  // CORS support for web clients, Electron/Tauri apps, and portals
+  app.use((req, res, next) => {
+    res.set('Access-Control-Allow-Origin', '*');
+    res.set('Access-Control-Allow-Methods', 'GET, POST, PUT, DELETE, PATCH, OPTIONS');
+    res.set('Access-Control-Allow-Headers', 'Authorization, X-API-Key, Content-Type, Range, If-None-Match, If-Modified-Since');
+    res.set('Access-Control-Expose-Headers', 'Content-Length, Content-Range, Content-Disposition, ETag, X-Checksum-Sha256, Digest, X-Nexus-Gateway, Retry-After');
+    if (req.method === 'OPTIONS') {
+      return res.status(204).end();
+    }
+    next();
+  });
+
   // --- security headers + telemetry logging ---
   app.use((req, res, next) => {
     res.set({
@@ -110,11 +122,15 @@ export function createApp({ config, clients, github, metrics, events, assetCache
     const origWrite = res.write;
     const origEnd = res.end;
     res.write = function (chunk, ...args) {
-      if (chunk) bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      if (chunk && typeof chunk !== 'function') {
+        bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      }
       return origWrite.call(this, chunk, ...args);
     };
     res.end = function (chunk, ...args) {
-      if (chunk) bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(chunk);
+      if (chunk && typeof chunk !== 'function') {
+        bytesSent += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+      }
       return origEnd.call(this, chunk, ...args);
     };
 

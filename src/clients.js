@@ -145,7 +145,13 @@ export class ClientStore {
       this.byName = new Map();
       return 0;
     }
-    const parsed = parseClients(JSON.parse(fs.readFileSync(this.file, 'utf8')));
+    const raw = fs.readFileSync(this.file, 'utf8').trim();
+    if (!raw) {
+      this.byHash = new Map();
+      this.byName = new Map();
+      return 0;
+    }
+    const parsed = parseClients(JSON.parse(raw));
     this.byHash = parsed.byHash;
     this.byName = parsed.byName;
     return this.byHash.size;

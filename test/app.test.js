@@ -716,6 +716,45 @@ test('Setup Wizard: complete end-to-end multi-step onboarding', async () => {
   assert.ok(data.registeredService);
   assert.equal(data.registeredService.id, 'telemetry-wiz');
 
-  // Reset admin token back for remaining tests / suite teardown
-  await adminReq('/api/admin/settings', 'PUT', { publicBaseUrl: 'https://proxy.example' }, 'msuite_adm_custom_wizard_token_999');
+  // Reset admin token and settings back for remaining tests
+  await adminReq('/api/admin/wizard/complete', 'POST', {
+    adminToken: ADMIN_TOKEN,
+    publicBaseUrl: 'https://proxy.example',
+  }, 'msuite_adm_custom_wizard_token_999');
+});
+
+test('CORS preflight and access control headers on /v1', async () => {
+  const optRes = await fetch(base + '/v1/me', { method: 'OPTIONS' });
+  assert.equal(optRes.status, 204);
+  assert.equal(optRes.headers.get('access-control-allow-origin'), '*');
+  assert.ok(optRes.headers.get('access-control-allow-methods').includes('GET'));
+  assert.ok(optRes.headers.get('access-control-allow-headers').includes('Authorization'));
+});
+
+test('ClientStore resilience with empty 0-byte file', () => {
+  const emptyFilePath = path.join(testCacheDir, 'empty_clients.json');
+  fs.writeFileSync(emptyFilePath, '');
+  const store = new ClientStore(emptyFilePath);
+  assert.doesNotThrow(() => {
+    const count = store.load();
+    assert.equal(count, 0);
+  });
+  if (fs.existsSync(emptyFilePath)) fs.unlinkSync(emptyFilePath);
+});
+
+test('ServiceGateway handles unreachable upstream gracefully with 502', async () => {
+  // Register service pointing to non-existent port (127.0.0.1:59999)
+  const regRes = await adminReq('/api/admin/services', 'POST', {
+    id: 'dead-service',
+    name: 'Unreachable Service',
+    target: 'http://127.0.0.1:59999',
+    allowedClients: ['a'],
+  });
+  assert.equal(regRes.status, 201);
+
+  const client = new NexusClient({ baseUrl: base, apiKey: KEY_A });
+  await assert.rejects(
+    () => client.callService('dead-service', '/ping'),
+    (err) => err.status === 502 || /502|unreachable|Failed to reach/i.test(err.message)
+  );
 });

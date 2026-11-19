@@ -18,8 +18,8 @@ export class MessageBus extends EventEmitter {
   topicMatches(filter, topic) {
     if (filter === '*' || filter === topic) return true;
     if (filter.endsWith('.*')) {
-      const prefix = filter.slice(0, -2);
-      return topic.startsWith(prefix);
+      const prefix = filter.slice(0, -1); // includes the trailing dot (e.g. "alerts.")
+      return topic.startsWith(prefix) || topic === filter.slice(0, -2);
     }
     return false;
   }

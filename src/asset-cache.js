@@ -156,7 +156,15 @@ export class AssetCache {
       const writeStream = fs.createWriteStream(tempPath);
       await pipeline(stream, hashPass, writeStream);
 
-      fs.renameSync(tempPath, destPath);
+      if (fs.existsSync(destPath)) {
+        try { fs.unlinkSync(destPath); } catch {}
+      }
+      try {
+        fs.renameSync(tempPath, destPath);
+      } catch {
+        fs.copyFileSync(tempPath, destPath);
+        try { fs.unlinkSync(tempPath); } catch {}
+      }
       const sha256Hex = hasher.digest('hex');
       const sha256Base64 = Buffer.from(sha256Hex, 'hex').toString('base64');
 
