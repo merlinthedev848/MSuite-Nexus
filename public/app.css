@@ -469,6 +469,12 @@ body.dark-theme {
   font-size: 0.75rem;
 }
 
+.btn-xs {
+  padding: 0.2rem 0.45rem;
+  font-size: 0.7rem;
+  border-radius: 4px;
+}
+
 .btn-icon {
   background: transparent;
   border: none;

@@ -367,6 +367,7 @@ function renderClientsTable(list) {
         <td>${(c.requests || 0).toLocaleString()}</td>
         <td class="text-muted text-xs">${c.lastSeen ? new Date(c.lastSeen).toLocaleTimeString() : 'Never'}</td>
         <td class="text-right">
+          <button class="btn-sm btn-outline btn-connect" data-name="${escapeHtml(c.name)}" title="View connection configuration and code snippets">Connect</button>
           <button class="btn-sm btn-outline btn-rotate" data-name="${escapeHtml(c.name)}">Rotate</button>
           <button class="btn-sm ${c.disabled ? 'btn-outline' : 'btn-ghost'} btn-toggle" data-name="${escapeHtml(c.name)}" data-disabled="${c.disabled}">
             ${c.disabled ? 'Enable' : 'Disable'}
@@ -377,6 +378,9 @@ function renderClientsTable(list) {
     `;
   }).join('');
 
+  tbody.querySelectorAll('.btn-connect').forEach((btn) => {
+    btn.onclick = () => showClientConnectModal(btn.dataset.name);
+  });
   tbody.querySelectorAll('.btn-rotate').forEach((btn) => {
     btn.onclick = () => rotateClientKey(btn.dataset.name);
   });
@@ -423,10 +427,135 @@ async function deleteClient(name) {
   }
 }
 
+let currentKeyModalLang = 'curl';
+let currentKeyClientName = '';
+let currentKeyVal = '';
+let currentConnectLang = 'curl';
+let currentConnectClientName = '';
+
+function generateClientSnippet(lang, clientName, key, baseUrl) {
+  const host = baseUrl || window.location.origin;
+  const envVar = (clientName || 'CLIENT').toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY';
+  const displayKey = key || `<YOUR_${envVar}>`;
+
+  if (lang === 'curl') {
+    return `# 1. Test authentication & verify permissions\ncurl -H "Authorization: Bearer ${displayKey}" \\\n  "${host}/v1/me"\n\n# 2. Discover authorized repositories\ncurl -H "Authorization: Bearer ${displayKey}" \\\n  "${host}/v1/repos"\n\n# 3. Check for application update\ncurl -H "Authorization: Bearer ${displayKey}" \\\n  "${host}/v1/repos/merlinthedev848/${clientName}/update?current=1.0.0&channel=stable"`;
+  }
+  if (lang === 'ps') {
+    return `# PowerShell Client Integration\n$hostUrl = "${host}"\n$apiKey = "${displayKey}"\n$headers = @{ "Authorization" = "Bearer $apiKey" }\n\n# 1. Verify connection to Nexus\n$identity = Invoke-RestMethod -Uri "$hostUrl/v1/me" -Headers $headers\nWrite-Host "Connected to Nexus as:" $identity.client\n\n# 2. Check for application update\n$update = Invoke-RestMethod -Uri "$hostUrl/v1/repos/merlinthedev848/${clientName}/update?current=1.0.0" -Headers $headers\nif ($update.update_available) {\n    Write-Host "New version available: $($update.latest_version)"\n}`;
+  }
+  if (lang === 'node') {
+    return `// Node.js / Electron / TypeScript SDK Integration\nimport { NexusClient } from './sdk/node/index.js';\n\nconst nexus = new NexusClient({\n  baseUrl: process.env.MSUITE_NEXUS_URL || '${host}',\n  apiKey: process.env.${envVar} || '${displayKey}',\n});\n\n// 1. Verify connection\nconst identity = await nexus.verifyAuth();\nconsole.log('Connected to Nexus:', identity.client);\n\n// 2. Discover authorized repos\nconst repos = await nexus.listRepos();\nconsole.log('Available repos:', repos.map(r => r.full_name));\n\n// 3. Check for updates\nconst update = await nexus.checkForUpdate('merlinthedev848/${clientName}', '1.0.0');\nif (update.updateAvailable) {\n  console.log('Update found:', update.latestVersion);\n}`;
+  }
+  if (lang === 'python') {
+    return `# Python Client SDK Integration\nimport os\nfrom msuite_nexus import NexusClient\n\nnexus = NexusClient(\n    base_url=os.getenv("MSUITE_NEXUS_URL", "${host}"),\n    api_key=os.getenv("${envVar}", "${displayKey}")\n)\n\n# 1. Verify connection\nme = nexus.verify_auth()\nprint(f"Connected to Nexus as: {me['client']}")\n\n# 2. Check for updates\nupdate = nexus.check_for_update("merlinthedev848/${clientName}", "1.0.0")\nif update.get("update_available"):\n    print(f"New update: {update['latest_version']}")`;
+  }
+  if (lang === 'csharp') {
+    return `// C# / .NET SDK Integration\nusing MSuite.Nexus;\n\nusing var nexus = new NexusClient(\n    baseUrl: Environment.GetEnvironmentVariable("MSUITE_NEXUS_URL") ?? "${host}",\n    apiKey: Environment.GetEnvironmentVariable("${envVar}") ?? "${displayKey}"\n);\n\n// 1. Verify connection\nvar me = await nexus.VerifyAuthAsync();\nConsole.WriteLine($"Connected to Nexus: {me.GetProperty("client").GetString()}");\n\n// 2. Check for update\nvar update = await nexus.CheckForUpdateAsync("merlinthedev848/${clientName}", "1.0.0");\nif (update.GetProperty("update_available").GetBoolean()) {\n    Console.WriteLine($"New version: {update.GetProperty("latest_version").GetString()}");\n}`;
+  }
+  return '';
+}
+
 function showKeyModal(clientName, key) {
-  el('keyDisplayClientLabel').textContent = `API Key for ${clientName}:`;
-  el('keyDisplayValue').textContent = key;
+  currentKeyClientName = clientName;
+  currentKeyVal = key;
+
+  const host = state.settings?.publicBaseUrl || window.location.origin;
+  const envVar = (clientName || 'CLIENT').toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY';
+
+  if (el('keyDisplayClientLabel')) el('keyDisplayClientLabel').textContent = `API Key for ${clientName}:`;
+  if (el('keyDisplayValue')) el('keyDisplayValue').textContent = key;
+  if (el('keyDisplayEnv')) {
+    el('keyDisplayEnv').textContent = `# MSuite Nexus Connection for ${clientName}\nMSUITE_NEXUS_URL=${host}\nMSUITE_NEXUS_KEY=${key}\n${envVar}=${key}`;
+  }
+
+  updateKeyModalSnippet();
   el('modalKeyDisplay').classList.remove('hidden');
+}
+
+function updateKeyModalSnippet() {
+  const host = state.settings?.publicBaseUrl || window.location.origin;
+  if (el('keySnippetCode')) {
+    el('keySnippetCode').textContent = generateClientSnippet(currentKeyModalLang, currentKeyClientName, currentKeyVal, host);
+  }
+}
+
+function showClientConnectModal(clientName) {
+  currentConnectClientName = clientName;
+  const host = state.settings?.publicBaseUrl || window.location.origin;
+  const envVar = (clientName || 'CLIENT').toUpperCase().replace(/[^A-Z0-9]/g, '_') + '_KEY';
+
+  if (el('clientConnectName')) el('clientConnectName').textContent = clientName;
+  if (el('clientConnectEnv')) {
+    el('clientConnectEnv').textContent = `# MSuite Nexus Connection for ${clientName}\nMSUITE_NEXUS_URL=${host}\n${envVar}=<YOUR_${envVar}>`;
+  }
+
+  updateClientConnectSnippet();
+  el('modalClientConnect').classList.remove('hidden');
+}
+
+function updateClientConnectSnippet() {
+  const host = state.settings?.publicBaseUrl || window.location.origin;
+  if (el('clientConnectSnippetCode')) {
+    el('clientConnectSnippetCode').textContent = generateClientSnippet(currentConnectLang, currentConnectClientName, '', host);
+  }
+}
+
+function setClientPerms(list) {
+  const perms = new Set(list);
+  if (el('permReleases')) el('permReleases').checked = perms.has('releases') || perms.has('*');
+  if (el('permRaw')) el('permRaw').checked = perms.has('raw') || perms.has('*');
+  if (el('permArchive')) el('permArchive').checked = perms.has('archive') || perms.has('*');
+  if (el('permServices')) el('permServices').checked = perms.has('services') || perms.has('*');
+  if (el('permBusPub')) el('permBusPub').checked = perms.has('bus:publish') || perms.has('*');
+  if (el('permBusSub')) el('permBusSub').checked = perms.has('bus:subscribe') || perms.has('*');
+}
+
+function renderClientRepoPicker() {
+  const container = el('newClientRepoPicker');
+  if (!container) return;
+
+  const currentRepos = (el('newClientRepos')?.value || '').split(',').map((s) => s.trim()).filter(Boolean);
+  const org = el('wizardGithubOrg')?.value || 'merlinthedev848';
+
+  const defaultPresets = [
+    { label: 'All Repos (*)', value: '*' },
+    { label: `${org}/* (Org Repos)`, value: `${org}/*` },
+  ];
+
+  const repoItems = (state.repos || []).map((r) => ({
+    label: `${r.private ? '🔒' : '🌐'} ${r.name}`,
+    value: r.full_name,
+  }));
+
+  const allItems = [...defaultPresets, ...repoItems];
+
+  container.innerHTML = allItems.map((item) => {
+    const isSelected = currentRepos.includes(item.value);
+    return `<button type="button" class="btn btn-xs ${isSelected ? 'btn-primary' : 'btn-outline'} btn-repo-chip" data-val="${escapeHtml(item.value)}" style="border-radius:12px; margin-bottom:2px;">
+      ${escapeHtml(item.label)}
+    </button>`;
+  }).join(' ');
+
+  container.querySelectorAll('.btn-repo-chip').forEach((btn) => {
+    btn.onclick = () => {
+      const val = btn.dataset.val;
+      let repos = (el('newClientRepos').value || '').split(',').map((s) => s.trim()).filter(Boolean);
+      if (val === '*') {
+        repos = ['*'];
+      } else {
+        repos = repos.filter((r) => r !== '*');
+        if (repos.includes(val)) {
+          repos = repos.filter((r) => r !== val);
+        } else {
+          repos.push(val);
+        }
+        if (!repos.length) repos = ['*'];
+      }
+      el('newClientRepos').value = repos.join(', ');
+      renderClientRepoPicker();
+    };
+  });
 }
 
 // 3. REPOSITORY EXPLORER
@@ -1375,11 +1504,72 @@ function setupEventListeners() {
     el('newClientIps').value = '*';
     el('newClientExpires').value = '90d';
     if (el('newClientRateLimit')) el('newClientRateLimit').value = '';
+    setClientPerms(['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe']);
+    renderClientRepoPicker();
     el('modalAddClient').classList.remove('hidden');
     el('newClientName').focus();
   };
   el('btnCloseAddClientModal').onclick = () => el('modalAddClient').classList.add('hidden');
   el('btnCancelAddClient').onclick = () => el('modalAddClient').classList.add('hidden');
+
+  if (el('newClientRepos')) {
+    el('newClientRepos').oninput = () => renderClientRepoPicker();
+  }
+
+  // Client quick presets
+  document.querySelectorAll('.btn-client-preset').forEach((btn) => {
+    btn.onclick = () => {
+      const preset = btn.dataset.preset;
+      const org = el('wizardGithubOrg')?.value || 'merlinthedev848';
+      if (preset === 'sip') {
+        el('newClientName').value = 'msuite-sip';
+        el('newClientDesc').value = 'MSuite SIP Desktop & VoIP Client';
+        el('newClientRepos').value = `${org}/MSuite-SIP`;
+        setClientPerms(['releases', 'raw', 'services']);
+      } else if (preset === 'sentinel') {
+        el('newClientName').value = 'msuite-sentinel';
+        el('newClientDesc').value = 'MSuite Sentinel Security Agent';
+        el('newClientRepos').value = `${org}/MSuite-Sentinel`;
+        setClientPerms(['releases', 'raw', 'services', 'bus:publish', 'bus:subscribe']);
+      } else if (preset === 'honeypot') {
+        el('newClientName').value = 'msuite-honeypot';
+        el('newClientDesc').value = 'MSuite HoneyPot Threat Sensor';
+        el('newClientRepos').value = `${org}/MSuite-HoneyPot`;
+        setClientPerms(['releases', 'raw', 'services', 'bus:publish']);
+      } else if (preset === 'mstream') {
+        el('newClientName').value = 'msuite-mstream';
+        el('newClientDesc').value = 'MSuite Media & Streaming Core';
+        el('newClientRepos').value = `${org}/MStream`;
+        setClientPerms(['releases', 'raw', 'archive', 'services']);
+      } else if (preset === 'universal') {
+        el('newClientName').value = 'msuite-fleet-universal';
+        el('newClientDesc').value = 'Universal Master Key for all MSuite Products';
+        el('newClientRepos').value = `${org}/*`;
+        setClientPerms(['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe']);
+      } else if (preset === 'custom') {
+        el('newClientName').value = '';
+        el('newClientDesc').value = '';
+        el('newClientRepos').value = '*';
+        setClientPerms(['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe']);
+      }
+      renderClientRepoPicker();
+    };
+  });
+
+  // Client IP presets
+  document.querySelectorAll('.btn-ip-preset').forEach((btn) => {
+    btn.onclick = () => {
+      el('newClientIps').value = btn.dataset.ip;
+    };
+  });
+
+  // Permissions fast toggles
+  if (el('btnPermSelectAll')) {
+    el('btnPermSelectAll').onclick = () => setClientPerms(['releases', 'raw', 'archive', 'services', 'bus:publish', 'bus:subscribe']);
+  }
+  if (el('btnPermReleasesOnly')) {
+    el('btnPermReleasesOnly').onclick = () => setClientPerms(['releases']);
+  }
 
   el('btnSaveNewClient').onclick = async () => {
     const name = el('newClientName').value.trim();
@@ -1425,8 +1615,69 @@ function setupEventListeners() {
     flashCopyButton(el('btnCopyKey'));
     toast('API key copied to clipboard!', 'success');
   };
+  if (el('btnCopyKeyEnv')) {
+    el('btnCopyKeyEnv').onclick = () => {
+      navigator.clipboard.writeText(el('keyDisplayEnv').textContent);
+      flashCopyButton(el('btnCopyKeyEnv'));
+      toast('Environment configuration copied!', 'success');
+    };
+  }
+  if (el('btnCopyKeySnippet')) {
+    el('btnCopyKeySnippet').onclick = () => {
+      navigator.clipboard.writeText(el('keySnippetCode').textContent);
+      flashCopyButton(el('btnCopyKeySnippet'));
+      toast('Connection code snippet copied!', 'success');
+    };
+  }
+  if (el('btnTestKeySandbox')) {
+    el('btnTestKeySandbox').onclick = () => {
+      el('modalKeyDisplay').classList.add('hidden');
+      const sandboxTab = document.querySelector('.nav-tab[data-tab="sandbox"]');
+      if (sandboxTab) sandboxTab.click();
+      if (el('sandboxClientKey')) el('sandboxClientKey').value = currentKeyVal;
+      if (el('sandboxPathInput')) el('sandboxPathInput').value = '/v1/me';
+      if (el('sandboxMethod')) el('sandboxMethod').value = 'GET';
+      executeSandboxRequest();
+    };
+  }
+
+  document.querySelectorAll('#keySnippetTabs .snippet-tab-btn').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('#keySnippetTabs .snippet-tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentKeyModalLang = btn.dataset.lang;
+      updateKeyModalSnippet();
+    };
+  });
+
   el('btnCloseKeyModal').onclick = () => el('modalKeyDisplay').classList.add('hidden');
   el('btnDoneKeyDisplay').onclick = () => el('modalKeyDisplay').classList.add('hidden');
+
+  // Client Connect Details Modal
+  if (el('btnCloseClientConnectModal')) el('btnCloseClientConnectModal').onclick = () => el('modalClientConnect').classList.add('hidden');
+  if (el('btnDoneClientConnect')) el('btnDoneClientConnect').onclick = () => el('modalClientConnect').classList.add('hidden');
+  if (el('btnCopyClientConnectEnv')) {
+    el('btnCopyClientConnectEnv').onclick = () => {
+      navigator.clipboard.writeText(el('clientConnectEnv').textContent);
+      flashCopyButton(el('btnCopyClientConnectEnv'));
+      toast('Client .env configuration copied!', 'success');
+    };
+  }
+  if (el('btnCopyClientConnectSnippet')) {
+    el('btnCopyClientConnectSnippet').onclick = () => {
+      navigator.clipboard.writeText(el('clientConnectSnippetCode').textContent);
+      flashCopyButton(el('btnCopyClientConnectSnippet'));
+      toast('Connection snippet copied!', 'success');
+    };
+  }
+  document.querySelectorAll('#clientConnectTabs .snippet-tab-btn').forEach((btn) => {
+    btn.onclick = () => {
+      document.querySelectorAll('#clientConnectTabs .snippet-tab-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      currentConnectLang = btn.dataset.lang;
+      updateClientConnectSnippet();
+    };
+  });
 
   el('clientSearchInput').oninput = () => renderClientsTable(state.clients);
 

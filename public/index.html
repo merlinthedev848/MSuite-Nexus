@@ -851,12 +851,22 @@
 
     <!-- MODAL: ADD CLIENT -->
     <div class="modal-backdrop hidden" id="modalAddClient">
-      <div class="modal-card">
+      <div class="modal-card modal-lg">
         <div class="modal-header">
           <h3>Create Client API Key</h3>
           <button class="modal-close" id="btnCloseAddClientModal">&times;</button>
         </div>
         <div class="modal-body">
+          <div class="preset-pill-row mb-3" style="display:flex; flex-wrap:wrap; gap:6px; align-items:center; background:#0b1120; padding:8px 12px; border-radius:6px; border:1px solid #1a2438;">
+            <span class="text-xs text-muted" style="font-weight:600;">⚡ Quick Presets:</span>
+            <button type="button" class="btn btn-xs btn-outline btn-client-preset" data-preset="sip">🎯 MSuite-SIP</button>
+            <button type="button" class="btn btn-xs btn-outline btn-client-preset" data-preset="sentinel">🛡️ MSuite-Sentinel</button>
+            <button type="button" class="btn btn-xs btn-outline btn-client-preset" data-preset="honeypot">🍯 MSuite-HoneyPot</button>
+            <button type="button" class="btn btn-xs btn-outline btn-client-preset" data-preset="mstream">📡 MStream</button>
+            <button type="button" class="btn btn-xs btn-outline btn-client-preset" data-preset="universal">👑 Universal Master</button>
+            <button type="button" class="btn btn-xs btn-ghost btn-client-preset" data-preset="custom">Reset</button>
+          </div>
+
           <div class="form-group">
             <label class="form-label" for="newClientName">Client App Name *</label>
             <input type="text" id="newClientName" class="form-input" placeholder="e.g. msuite-sip, msuite-sentinel">
@@ -869,35 +879,54 @@
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="newClientRepos">Allowed Repositories *</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label class="form-label" for="newClientRepos" style="margin-bottom:0;">Allowed Repositories *</label>
+              <span class="text-xs text-muted">Click badges below to toggle access</span>
+            </div>
             <input type="text" id="newClientRepos" class="form-input" value="*" placeholder="owner/repo, owner/*, or *">
+            <div id="newClientRepoPicker" class="repo-picker-chips mt-2" style="display:flex; flex-wrap:wrap; gap:5px; max-height:100px; overflow-y:auto; padding:4px 0;">
+              <!-- Dynamic repository chips populated by JavaScript -->
+            </div>
             <span class="form-hint">Comma-separated patterns. Example: <code>merlinthedev848/MSuite-SIP, merlinthedev848/*</code></span>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="newClientIps">Allowed IP / CIDR Subnets</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+              <label class="form-label" for="newClientIps" style="margin-bottom:0;">Allowed IP / CIDR Subnets</label>
+              <div style="display:flex; gap:4px;">
+                <button type="button" class="btn btn-xs btn-ghost btn-ip-preset" data-ip="*">Anywhere (*)</button>
+                <button type="button" class="btn btn-xs btn-ghost btn-ip-preset" data-ip="10.0.0.0/8, 192.168.0.0/16, 172.16.0.0/12">Private LAN</button>
+                <button type="button" class="btn btn-xs btn-ghost btn-ip-preset" data-ip="127.0.0.1, ::1">Localhost</button>
+              </div>
+            </div>
             <input type="text" id="newClientIps" class="form-input" value="*" placeholder="* or 10.0.0.0/8, 192.168.1.100">
             <span class="form-hint">Restrict key usage to specific company subnets or leave <code>*</code> for anywhere.</span>
           </div>
 
-          <div class="form-group">
-            <label class="form-label" for="newClientExpires">Key Expiration</label>
-            <select id="newClientExpires" class="form-input">
-              <option value="never">Never Expire</option>
-              <option value="30d">30 Days</option>
-              <option value="90d" selected>90 Days (Recommended)</option>
-              <option value="365d">1 Year</option>
-            </select>
+          <div class="form-row" style="display:flex; gap:12px;">
+            <div class="form-group" style="flex:1;">
+              <label class="form-label" for="newClientExpires">Key Expiration</label>
+              <select id="newClientExpires" class="form-input">
+                <option value="never">Never Expire</option>
+                <option value="30d">30 Days</option>
+                <option value="90d" selected>90 Days (Recommended)</option>
+                <option value="365d">1 Year</option>
+              </select>
+            </div>
+            <div class="form-group" style="flex:1;">
+              <label class="form-label" for="newClientRateLimit">Custom Rate Limit (req/min)</label>
+              <input type="number" id="newClientRateLimit" class="form-input" placeholder="Default (120 req/min) or 0 for unlimited">
+            </div>
           </div>
 
           <div class="form-group">
-            <label class="form-label" for="newClientRateLimit">Custom Rate Limit (req/min)</label>
-            <input type="number" id="newClientRateLimit" class="form-input" placeholder="Default (global 120 req/min) or 0 for unlimited">
-            <span class="form-hint">Leave blank to use the server default, or set a custom rate limit for this app.</span>
-          </div>
-
-          <div class="form-group">
-            <label class="form-label">Allowed Permissions *</label>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label class="form-label" style="margin-bottom:0;">Allowed Permissions *</label>
+              <div style="display:flex; gap:6px;">
+                <button type="button" class="btn btn-xs btn-ghost" id="btnPermSelectAll">Select All</button>
+                <button type="button" class="btn btn-xs btn-ghost" id="btnPermReleasesOnly">Releases Only</button>
+              </div>
+            </div>
             <div class="checkbox-group">
               <label class="checkbox-pill">
                 <input type="checkbox" id="permReleases" checked>
@@ -977,25 +1006,98 @@
 
     <!-- MODAL: KEY CREATED / ROTATED -->
     <div class="modal-backdrop hidden" id="modalKeyDisplay">
-      <div class="modal-card">
+      <div class="modal-card modal-lg">
         <div class="modal-header">
-          <h3 class="text-emerald">🔑 API Key Generated</h3>
+          <h3 class="text-emerald" style="display:flex; align-items:center; gap:8px;">
+            <span>🔑</span> <span id="keyDisplayTitle">API Key Generated</span>
+          </h3>
           <button class="modal-close" id="btnCloseKeyModal">&times;</button>
         </div>
         <div class="modal-body">
           <div class="alert-box alert-warning">
             ⚠️ <strong>Save this key now!</strong> It will never be displayed again. Only a cryptographic SHA-256 hash is retained on the server.
           </div>
+
           <div class="form-group mt-3">
             <label class="form-label" id="keyDisplayClientLabel">API Key:</label>
-            <div class="key-display-box">
-              <code id="keyDisplayValue">msk_...</code>
-              <button class="btn-sm btn-primary" id="btnCopyKey">Copy Key</button>
+            <div class="key-display-box" style="display:flex; gap:8px; align-items:center;">
+              <code id="keyDisplayValue" style="flex:1; word-break:break-all; font-size:0.9rem; padding:0.6rem; background:#0b1120; border:1px solid #1e293b; border-radius:6px; color:#38bdf8;">msk_...</code>
+              <button class="btn btn-primary" id="btnCopyKey" style="white-space:nowrap;">📋 Copy Key</button>
+            </div>
+          </div>
+
+          <div class="form-group mt-3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label class="form-label" style="margin-bottom:0; font-weight:600;">Environment Configuration (.env)</label>
+              <button class="btn btn-xs btn-outline" id="btnCopyKeyEnv">📋 Copy .env</button>
+            </div>
+            <pre class="snippet-pre" style="margin-top:0;"><code id="keyDisplayEnv">MSUITE_NEXUS_URL=http://...
+MSUITE_NEXUS_KEY=msk_...</code></pre>
+          </div>
+
+          <div class="form-group mt-3">
+            <div class="snippet-header">
+              <span class="snippet-title">Connection &amp; Test Code</span>
+              <div class="snippet-tabs" id="keySnippetTabs">
+                <button type="button" class="snippet-tab-btn active" data-lang="curl">cURL</button>
+                <button type="button" class="snippet-tab-btn" data-lang="ps">PowerShell</button>
+                <button type="button" class="snippet-tab-btn" data-lang="node">Node.js</button>
+                <button type="button" class="snippet-tab-btn" data-lang="python">Python</button>
+                <button type="button" class="snippet-tab-btn" data-lang="csharp">C#</button>
+              </div>
+            </div>
+            <div class="snippet-code-wrap">
+              <button class="btn-sm btn-ghost btn-copy-snippet" id="btnCopyKeySnippet" style="position:absolute; top:8px; right:8px;">Copy</button>
+              <pre class="snippet-pre" style="margin:0;"><code id="keySnippetCode"></code></pre>
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer" style="display:flex; justify-content:space-between;">
+          <button class="btn btn-secondary" id="btnTestKeySandbox">🧪 Test in Sandbox</button>
+          <button class="btn btn-primary" id="btnDoneKeyDisplay">Done</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- MODAL: CLIENT CONNECTION DETAILS -->
+    <div class="modal-backdrop hidden" id="modalClientConnect">
+      <div class="modal-card modal-lg">
+        <div class="modal-header">
+          <h3 style="display:flex; align-items:center; gap:8px;">
+            <span>🔌</span> <span id="clientConnectTitle">Connect Client Application</span>
+          </h3>
+          <button class="modal-close" id="btnCloseClientConnectModal">&times;</button>
+        </div>
+        <div class="modal-body">
+          <p class="text-secondary text-sm">
+            Use this configuration to connect <strong id="clientConnectName">client</strong> to MSuite Nexus.
+          </p>
+          <div class="form-group mt-3">
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:6px;">
+              <label class="form-label" style="margin-bottom:0; font-weight:600;">Client .env Configuration</label>
+              <button class="btn btn-xs btn-outline" id="btnCopyClientConnectEnv">📋 Copy .env</button>
+            </div>
+            <pre class="snippet-pre"><code id="clientConnectEnv"></code></pre>
+          </div>
+          <div class="form-group mt-3">
+            <div class="snippet-header">
+              <span class="snippet-title">Integration Code Example</span>
+              <div class="snippet-tabs" id="clientConnectTabs">
+                <button type="button" class="snippet-tab-btn active" data-lang="curl">cURL</button>
+                <button type="button" class="snippet-tab-btn" data-lang="ps">PowerShell</button>
+                <button type="button" class="snippet-tab-btn" data-lang="node">Node.js</button>
+                <button type="button" class="snippet-tab-btn" data-lang="python">Python</button>
+                <button type="button" class="snippet-tab-btn" data-lang="csharp">C#</button>
+              </div>
+            </div>
+            <div class="snippet-code-wrap">
+              <button class="btn-sm btn-ghost btn-copy-snippet" id="btnCopyClientConnectSnippet" style="position:absolute; top:8px; right:8px;">Copy</button>
+              <pre class="snippet-pre" style="margin:0;"><code id="clientConnectSnippetCode"></code></pre>
             </div>
           </div>
         </div>
         <div class="modal-footer">
-          <button class="btn btn-primary" id="btnDoneKeyDisplay">Done</button>
+          <button class="btn btn-primary" id="btnDoneClientConnect">Close</button>
         </div>
       </div>
     </div>

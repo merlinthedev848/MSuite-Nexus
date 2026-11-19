@@ -54,6 +54,13 @@ class NexusClient:
         """Test API key authentication and permissions."""
         return self._request("/v1/me")
 
+    def list_repos(self) -> list:
+        """List private & public repositories permitted for this client key."""
+        res = self._request("/v1/repos")
+        if isinstance(res, dict):
+            return res.get("repos", [])
+        return []
+
     def check_for_update(self, repo: str, current_version: str, channel: str = "stable") -> Dict[str, Any]:
         """Check if an update is available on a given channel."""
         owner, name = repo.split("/")

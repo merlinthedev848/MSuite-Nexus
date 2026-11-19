@@ -33,6 +33,22 @@ namespace MSuite.Nexus
             }
         }
 
+        public async Task<JsonElement> VerifyAuthAsync(CancellationToken ct = default)
+        {
+            var response = await _http.GetAsync($"{_baseUrl}/v1/me", ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonDocument.Parse(json).RootElement;
+        }
+
+        public async Task<JsonElement> ListReposAsync(CancellationToken ct = default)
+        {
+            var response = await _http.GetAsync($"{_baseUrl}/v1/repos", ct);
+            response.EnsureSuccessStatusCode();
+            var json = await response.Content.ReadAsStringAsync(ct);
+            return JsonDocument.Parse(json).RootElement;
+        }
+
         public async Task<JsonElement> CheckForUpdateAsync(string repo, string currentVersion, string channel = "stable", CancellationToken ct = default)
         {
             var parts = repo.Split('/');
