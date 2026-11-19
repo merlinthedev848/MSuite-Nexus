@@ -13,7 +13,7 @@ RUN mkdir -p /app/.cache /config && chown -R node:node /app /config
 
 USER node
 EXPOSE 8080
-ENV PORT=8080 CLIENTS_FILE=/config/clients.json
+ENV PORT=8080 CLIENTS_FILE=/config/clients.json SERVICES_FILE=/config/services.json
 
 HEALTHCHECK --interval=30s --timeout=5s --retries=3 \
   CMD wget -qO- http://127.0.0.1:${PORT}/health || exit 1

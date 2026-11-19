@@ -22,6 +22,7 @@ export function loadConfig(env = process.env) {
     githubToken: githubTokens[0] || '',
     githubApiUrl: (env.GITHUB_API_URL || 'https://api.github.com').replace(/\/+$/, ''),
     clientsFile: env.CLIENTS_FILE || './clients.json',
+    servicesFile: env.SERVICES_FILE || './services.json',
     adminToken: env.ADMIN_TOKEN || env.ADMIN_PASSWORD || '',
     webhookSecret: env.WEBHOOK_SECRET || '',
     cacheTtlMs: num(env.CACHE_TTL_SECONDS, 60) * 1000,

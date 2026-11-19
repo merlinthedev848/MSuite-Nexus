@@ -10,8 +10,8 @@ import { pipeline } from 'node:stream/promises';
  * injecting upstream credentials, enforcing RBAC and IP guard rules, and logging telemetry.
  */
 export class ServiceGateway {
-  constructor({ configFile, log = console.log, fetchImpl = globalThis.fetch } = {}) {
-    this.configFile = configFile || path.join(process.cwd(), '.cache', 'services.json');
+  constructor({ configFile, file, log = console.log, fetchImpl = globalThis.fetch } = {}) {
+    this.configFile = configFile || file || process.env.SERVICES_FILE || path.join(process.cwd(), '.cache', 'services.json');
     this.log = log;
     this.fetch = fetchImpl;
     this.services = new Map(); // id -> serviceConfig

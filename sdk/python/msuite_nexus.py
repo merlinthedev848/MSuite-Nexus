@@ -35,7 +35,10 @@ class NexusClient:
 
     def _request(self, path: str, method: str = "GET", data: Optional[bytes] = None) -> Any:
         url = f"{self.base_url}{path}"
-        req = urllib.request.Request(url, data=data, headers=self.headers, method=method)
+        headers = dict(self.headers)
+        if data is not None and "Content-Type" not in headers:
+            headers["Content-Type"] = "application/json"
+        req = urllib.request.Request(url, data=data, headers=headers, method=method)
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as resp:
                 content_type = resp.headers.get("Content-Type", "")

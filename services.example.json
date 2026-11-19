@@ -1,0 +1,12 @@
+{
+  "services": [
+    {
+      "id": "telemetry",
+      "name": "Sentinel Telemetry Ingestion",
+      "target": "http://10.0.0.12:8001",
+      "authHeader": "Bearer internal_secret_telemetry_key",
+      "allowedClients": ["msuite-sentinel", "msuite-fleet-universal"],
+      "enabled": true
+    }
+  ]
+}

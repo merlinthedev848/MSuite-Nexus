@@ -8,4 +8,5 @@ services:
       - "8080:8080"
     volumes:
       - ./clients.json:/config/clients.json
+      - ./services.json:/config/services.json
       - ./cache:/app/.cache

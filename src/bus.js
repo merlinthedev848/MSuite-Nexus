@@ -74,7 +74,21 @@ export class MessageBus extends EventEmitter {
 
     this.subscribers.add(sub);
 
+    const timer = setInterval(() => {
+      try {
+        if (!res.writableEnded && !res.destroyed) {
+          res.write(': ping\n\n');
+        } else {
+          cleanup();
+        }
+      } catch {
+        cleanup();
+      }
+    }, 15000);
+    if (timer.unref) timer.unref();
+
     const cleanup = () => {
+      clearInterval(timer);
       this.subscribers.delete(sub);
     };
 

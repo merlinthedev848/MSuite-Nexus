@@ -40,7 +40,7 @@ clients.watch(log);
 const metrics = new MetricsCollector();
 const events = new EventBroker();
 const bus = new MessageBus();
-const gateway = new ServiceGateway({ log });
+const gateway = new ServiceGateway({ file: config.servicesFile, log });
 const audit = new AuditLogger({ logFile: config.auditLogFile });
 const assetCache = new AssetCache({
   cacheDir: config.assetCacheDir,
